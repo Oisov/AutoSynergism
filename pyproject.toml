@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "autosynergism"
+version = "0.1.0"
+description = "Misc python tools autoclicker etc for synergism.cc"
+authors = ["Øistein Søvik <Oistein.Sovik.92@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+pynput = "^1.7.7"
+pytesseract = "^0.3.10"
+opencv-python = "^4.10.0.84"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

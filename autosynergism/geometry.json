@@ -1,0 +1,312 @@
+{
+    "scale_x": 1,
+    "scale_y": 1,
+    "rectangles": {
+        "resources:quarks": {
+            "x": 1585,
+            "y": 198,
+            "width": 235,
+            "height": 50
+        },
+        "tab:buildings:C10": {
+            "x": 456.5,
+            "y": 390,
+            "width": 227,
+            "height": 50
+        },
+        "buildings:coin:workers": {
+            "x": 617,
+            "y": 629,
+            "width": 568,
+            "height": 68
+        },
+        "subtab:buildings:coin": {
+            "x": 877,
+            "y": 475,
+            "width": 340,
+            "height": 70
+        },
+        "tab:buildings:C9": {
+            "x": 577,
+            "y": 390,
+            "width": 227,
+            "height": 50
+        },
+        "tab:buildings": {
+            "x": 336,
+            "y": 390,
+            "width": 227,
+            "height": 50
+        },
+        "subtab:challenges_normal": {
+            "x": 1525,
+            "y": 475,
+            "width": 228,
+            "height": 68
+        },
+        "button:ascension": {
+            "x": 2420,
+            "y": 173,
+            "width": 73,
+            "height": 73
+        },
+        "challenges:text_under_challenges": {
+            "x": 2160,
+            "y": 896,
+            "width": 770,
+            "height": 30
+        },
+        "challenges:completions": {
+            "x": 1353,
+            "y": 938,
+            "width": 1260,
+            "height": 60
+        },
+        "challenge:C10:highest_beaten:C9": {
+            "x": 2393,
+            "y": 738,
+            "width": 146,
+            "height": 146
+        },
+        "subtab:challenges_exalt": {
+            "x": 1787,
+            "y": 475,
+            "width": 228,
+            "height": 68
+        },
+        "exalt:1": {
+            "x": 1388,
+            "y": 647,
+            "width": 145,
+            "height": 145
+        },
+        "exalt:2": {
+            "x": 1543,
+            "y": 647,
+            "width": 145,
+            "height": 145
+        },
+        "exalt:3": {
+            "x": 1697,
+            "y": 647,
+            "width": 145,
+            "height": 145
+        },
+        "exalt:4": {
+            "x": 1851,
+            "y": 647,
+            "width": 145,
+            "height": 145
+        },
+        "exalt:5": {
+            "x": 2006,
+            "y": 647,
+            "width": 145,
+            "height": 145
+        },
+        "anthill:sac":{
+            "x": 2341,
+            "y": 567,
+            "width": 146,
+            "height": 146
+        },
+        "subtab:tributes": {
+            "x": 417,
+            "y": 509,
+            "width": 568,
+            "height": 68
+        },
+        "tributes:buy:x1": {
+            "x": 1321,
+            "y": 754,
+            "width": 228,
+            "height": 68
+        },
+        "subtab:forge": {
+            "x": 417,
+            "y": 1001,
+            "width": 568,
+            "height": 68
+        },
+        "qhept:max": {
+            "x": 2360,
+            "y": 883,
+            "width": 139,
+            "height": 59
+        },
+        "qhept:craft": {
+            "x": 2222,
+            "y": 883,
+            "width": 139,
+            "height": 59
+        },
+        "qhept:expand": {
+            "x": 2222,
+            "y": 946,
+            "width": 139,
+            "height": 59
+        },
+        "qhept:bar": {
+            "x": 2086,
+            "y": 1016,
+            "width": 413,
+            "height": 47
+        },
+        "subtab:settings": {
+            "x": 330,
+            "y": 475,
+            "width": 342,
+            "height": 69
+        },
+        "stats_for_nerds:savefile:1": {
+            "x": 2567,
+            "y": 693,
+            "width": 570,
+            "height": 68
+        },
+        "stats_for_nerds:savefile:2": {
+            "x": 2567,
+            "y": 600,
+            "width": 570,
+            "height": 68
+        },
+        "settings:daily": {
+            "x": 426,
+            "y": 1072,
+            "width": 643,
+            "height": 68
+        },
+        "settings:promotion_code": {
+            "x": 426,
+            "y": 1297,
+            "width": 643,
+            "height": 68
+        },
+        "quark_shop:s1x1:level": {
+            "x": 1022,
+            "y": 740,
+            "width": 250,
+            "height": 40
+        },
+        "quark_shop:s1x1": {
+            "x": 1022,
+            "y": 784,
+            "width": 250,
+            "height": 90
+        },
+        "subtab:singularity_shop": {
+            "x": 1263,
+            "y": 475,
+            "width": 228,
+            "height": 70
+        },
+        "singularity_shop:spent_gq_on_upgrade": {
+            "x": 1525,
+            "y": 1625,
+            "width": 528,
+            "height": 70
+        },
+        "subtab:perks": {
+            "x": 1525,
+            "y": 475,
+            "width": 228,
+            "height": 70
+        },
+        "subtab:octeracts": {
+            "x": 1787,
+            "y": 475,
+            "width": 228,
+            "height": 70
+        },
+        "subtab:ambrosia": {
+            "x": 2048,
+            "y": 475,
+            "width": 228,
+            "height": 70
+        },
+        "ambrosia:current_and_lifetime": {
+            "x": 1100,
+            "y": 630,
+            "width": 1350,
+            "height": 40
+        },
+        "ambrosia:blue_bar": {
+            "x": 1340,
+            "y": 900,
+            "width": 854,
+            "height": 77
+        },
+        "ambrosia:red_bar": {
+            "x": 1340,
+            "y": 977,
+            "width": 854,
+            "height": 77
+        },
+        "ambrosia:loadout_1": {
+            "x": 1223,
+            "y": 1568,
+            "width": 75,
+            "height": 72
+        },
+        "ambrosia:loadout_2": {
+            "x": 1305,
+            "y": 1568,
+            "width": 75,
+            "height": 72
+        },
+        "ambrosia:loadout_3": {
+            "x": 1387,
+            "y": 1568,
+            "width": 75,
+            "height": 72
+        },
+        "ambrosia:loadout_4": {
+            "x": 1469,
+            "y": 1568,
+            "width": 75,
+            "height": 72
+        },
+        "ambrosia:loadout_5": {
+            "x": 1551,
+            "y": 1568,
+            "width": 75,
+            "height": 72
+        },
+        "amborosia:loadout_6": {
+            "x": 1632,
+            "y": 1568,
+            "width": 75,
+            "height": 72
+        },
+        "amborosia:loadout_7": {
+            "x": 1714,
+            "y": 1568,
+            "width": 75,
+            "height": 72
+        },
+        "amborosia:loadout_8": {
+            "x": 1796,
+            "y": 1568,
+            "width": 75,
+            "height": 72
+        },
+        "ambrosia:mode": {
+            "x": 1878,
+            "y": 1568,
+            "width": 438,
+            "height": 72
+        },
+        "sing_shop:s1x1": {
+            "x": 1201,
+            "y": 884,
+            "width": 73,
+            "height": 73
+        },
+        "sing_shop:gq": {
+            "x": 1350,
+            "y": 566,
+            "width": 900,
+            "height": 175
+        }
+    }
+}
