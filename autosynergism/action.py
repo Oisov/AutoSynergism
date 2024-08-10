@@ -61,7 +61,7 @@ class Actions:
         self.mouse.position = position
         for _ in range(times):
             time.sleep(0.05)  # Small delay between keystrokes for realism
-            self.mouse.click(button,1)
+            self.mouse.click(button, 1)
         for modifier in modifiers:
             self.keyboard.release(modifier)
 
@@ -76,6 +76,7 @@ class Actions:
 
     def type_text(self, text):
         """Type out the provided text."""
+        last_char=None
         for char in str(text):
             self.keyboard.type(char)
             time.sleep(0.05)  # Small delay between keystrokes for realism

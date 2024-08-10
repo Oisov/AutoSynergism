@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 from pathlib import Path
 from pprint import pprint
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Literal, Optional
 
 from pynput.keyboard import Key
 
@@ -27,10 +27,12 @@ TIME_TO_LUCK = 0
 AMBROSIA_LOADOUT = None
 
 STATE = {
+    "T0": 0.0,
     "CURRENT_TAB": "",
     "TIME_TO_LUCK": 0,
     "AMBROSIA_LOADOUT": "",
     "HIGHEST_BEATEN_CHALLENGE": 8,
+    "ORDER_OF_MAGNITUDES": 0,
     "SINGS": 0,
     "P4x4": 0,
     "GQ_SPENT": 0,
@@ -40,6 +42,7 @@ STATE = {
     "GQ_SPENT_LAST_SING": 0,
     "QUARKS_SPENT_LAST_SING": 0,
     "TIME_TO_SING": 0,
+    "AVERAGE_SING_TIME": 0,
     "SING_STARTED_AT": 0,
 }
 
@@ -60,6 +63,7 @@ class AmbrosiaUpgrade:
     cost: Callable[[int], float]
     blue_berry_cost: int = 0
     max_level: int = 1
+    requirements: dict[str, int] = field(default_factory=dict)
 
     cubes: Callable[[int, int], float] | Callable[[int], float] = field(
         default_factory=lambda: lambda _: 1
@@ -105,21 +109,29 @@ def delete_old_files(folder_path, filename_prefix, dry_run=True):
             except Exception as e:
                 not_deleted_files.append(f"{file}: {e}")
                 pass
-        print("Deleted file:\n    ", "\n    ".join(str(x) for x in deleted_files))
-        print(
-            f"Failed to delete:\n    " "\n    ".join(str(x) for x in not_deleted_files)
-        )
+        if deleted_files:
+            print("Deleted file:\n    ", "\n    ".join(str(x) for x in deleted_files))
+        if not_deleted_files:
+            print(
+                f"Failed to delete:\n    " "\n    ".join(str(x) for x in not_deleted_files)
+            )
     else:
         print(f"Files to be deleted:\n   ", "\n    ".join(str(x) for x in old_files))
     return newest_file
 
 
-def load_stats():
+def load_stats(download_file=True):
+    if download_file:
+        go_to_tab("settings")
+        actions.click("subtab:stats_for_nerds")
+        actions.perform_sequence("stats_for_nerds:savefile")
+
     newest_file = delete_old_files(
-        Path.home() / "Downloads", "Statistics-Synergism", True
+        Path.home() / "Downloads", "Statistics-Synergism", dry_run=False
     )
     if newest_file is None:
         return {}
+
     stats = {"ooms": 0.0}
     with open(newest_file) as f:
         for line in f.readlines():
@@ -127,10 +139,11 @@ def load_stats():
             if ":" not in line:
                 continue
             name, content = [x.strip() for x in line.split(":", maxsplit=1)]
+            content = content.replace(",","")
             if name == "quarks":
                 stats["quarks"] = float(content)
             elif name == "golden quarks":
-                stats["golden quarks"] = float(content)
+                stats["golden_quarks"] = float(content)
             elif line.startswith("wow"):
                 cubes = None
                 try:
@@ -151,143 +164,174 @@ def base_cost_formula(level: int, base: float, power: int = 3):
     return base * (level**power - (max(level - 1, 0)) ** power)
 
 
-{
-    "ambrosiaTutorial": 10,
-    "ambrosiaPatreon": 1,
-    "ambrosiaHyperflux": 5,
-    "ambrosiaQuarks1": 20,
-    "ambrosiaCubes1": 50,
-    "ambrosiaLuck1": 20,
-    "ambrosiaLuckCube1": 7,
-    "ambrosiaQuarkCube1": 7,
-    "ambrosiaCubes2": 15,
-}
-
-
 @dataclass
 class Ambrosia:
     quarks: float = 0
-    ooom: int = 0
+    ooms: int = 0
+    luck_base: float = 0
+    luck_mult: float = 0
+    p4x4: float = 0
 
     def __post_init__(self):
         pass
 
         amb = {}
+        self.levels = {0: {}, 1: {}, 2: {}, 3: {}}
         ####==========###
         # LEVEL 1     ###
         ####===========##
-        amb["ambrosiaTutorial"] = AmbrosiaUpgrade(
-            name="Ambrosia Tutorial Module",
-            cost=lambda n: base_cost_formula(level=n, base=1, power=2),
-            cubes=lambda n: 1 + 0.05 * n,
-            quarks=lambda n: 1 + 0.01 * n,
-            max_level=10,
-        )
-        amb["ambrosiaPatreon"] = AmbrosiaUpgrade(
-            name="Shameless, Ambrosial Patreon Reminder",
-            cost=lambda _: float(1),
-            max_level=1,
-        )
-        amb["ambrosiaHyperflux"] = AmbrosiaUpgrade(
-            name="Shameless, Ambrosial Patreon Reminder",
-            cost=lambda x: 33333 + 33333 * min(4, x - 1) * max(1, 3 ** (x - 5)),
-            cubes=lambda n, y: (1 + (1 / 100) * n) ** y,
-            max_level=7,
-        )
-        amb["obtainium"] = AmbrosiaUpgrade(
-            name="RNG-based Obtainium Booster",
-            cost=lambda x: 500 * 25 ** (x - 1),
-            max_level=2,
-        )
-        amb["offerings"] = AmbrosiaUpgrade(
-            name="RNG-based Offering Booster",
-            cost=lambda x: 500 * 25 ** (x - 1),
-            max_level=2,
-        )
+        self.levels[0] = {
+            "ambrosiaTutorial": AmbrosiaUpgrade(
+                name="Ambrosia Tutorial Module",
+                cost=lambda n: base_cost_formula(level=n, base=1, power=2),
+                cubes=lambda n: 1 + 0.05 * n,
+                quarks=lambda n: 1 + 0.01 * n,
+                max_level=10,
+            ),
+            "ambrosiaPatreon": AmbrosiaUpgrade(
+                name="Shameless, Ambrosial Patreon Reminder",
+                cost=lambda _: float(1),
+                max_level=1,
+            ),
+            "obtainium": AmbrosiaUpgrade(
+                name="RNG-based Obtainium Booster",
+                cost=lambda x: 500 * 25 ** (x - 1),
+                max_level=2,
+            ),
+            "offerings": AmbrosiaUpgrade(
+                name="RNG-based Offering Booster",
+                cost=lambda x: 500 * 25 ** (x - 1),
+                max_level=2,
+            ),
+            "ambrosiaHyperflux": AmbrosiaUpgrade(
+                name="Shameless, Ambrosial Patreon Reminder",
+                cost=lambda x: 33333 + 33333 * min(4, x - 1) * max(1, 3 ** (x - 5)),
+                cubes=lambda n, y: (1 + (1 / 100) * n) ** y,
+                max_level=7,
+            ),
+        }
+        self.ambrosiaTutorial = self.levels[0]["ambrosiaTutorial"]
+        self.ambrosiaPatreon = self.levels[0]["ambrosiaPatreon"]
+        self.ambrosiaHyperflux = self.levels[0]["ambrosiaHyperflux"]
+        self.ambrosiaObtainium = self.levels[0]["obtainium"]
+        self.ambrosiaOfferings = self.levels[0]["offerings"]
         ####==========###
         # LEVEL 2     ###
         ####===========##
-        amb["ambrosiaQuarks1"] = AmbrosiaUpgrade(
-            name="Ambrosia Quark Module I",
-            cost=lambda x: base_cost_formula(level=x, base=1, power=3),
-            quarks=lambda n: 1 + 0.01 * n,
-            max_level=100,
-        )
-        amb["ambrosiaCubes1"] = AmbrosiaUpgrade(
-            name="Ambrosia Cube Module I",
-            cost=lambda x: base_cost_formula(level=x, base=1, power=3),
-            cubes=lambda x: (1 + 0.05 * x) * math.pow(1.1, math.floor(x / 10)),
-            max_level=100,
-        )
-        amb["ambrosiaLuck1"] = AmbrosiaUpgrade(
-            name="Ambrosia Luck Module I",
-            cost=lambda x: base_cost_formula(level=x, base=1, power=3),
-            luck=lambda x: 2 * x + 12 * int(x / 10),
-            max_level=100,
-        )
+        self.levels[1] = {
+            "ambrosiaQuarks1": AmbrosiaUpgrade(
+                name="Ambrosia Quark Module I",
+                cost=lambda x: base_cost_formula(level=x, base=1, power=3),
+                quarks=lambda n: 1 + 0.01 * n,
+                max_level=100,
+                requirements={"ambrosiaTutorial": 10},
+            ),
+            "ambrosiaCubes1": AmbrosiaUpgrade(
+                name="Ambrosia Cube Module I",
+                cost=lambda x: base_cost_formula(level=x, base=1, power=3),
+                cubes=lambda x: (1 + 0.05 * x) * math.pow(1.1, math.floor(x / 10)),
+                max_level=100,
+                requirements={"ambrosiaTutorial": 10},
+            ),
+            "ambrosiaLuck1": AmbrosiaUpgrade(
+                name="Ambrosia Luck Module I",
+                cost=lambda x: base_cost_formula(level=x, base=1, power=3),
+                luck=lambda x: 2 * x + 12 * int(x / 10),
+                max_level=100,
+                requirements={"ambrosiaTutorial": 10},
+            ),
+        }
+        self.ambrosiaQuarks1 = self.levels[1]["ambrosiaQuarks1"]
+        self.ambrosiaCubes1 = self.levels[1]["ambrosiaCubes1"]
+        self.ambrosiaLuck1 = self.levels[1]["ambrosiaLuck1"]
         ####==========###
         # LEVEL 3     ###
         ####===========##
-        amb["ambrosiaCubeQuark1"] = AmbrosiaUpgrade(
-            name="Ambrosia Cube-Quark Hybrid Module I",
-            cost=lambda x: base_cost_formula(level=x, base=500, power=3),
-            quarks=lambda n, y: 1 + 0.0001 * n * y,
-            max_level=25,
-        )
-        amb["ambrosiaLuckQuark1"] = AmbrosiaUpgrade(
-            name="Ambrosia Cube-Quark Hybrid Module I",
-            cost=lambda x: base_cost_formula(level=x, base=500, power=3),
-            quarks=lambda n, y: 1 + 0.0001 * n * min(y, 1000**0.5 * y**0.5),
-            max_level=25,
-        )
-        amb["ambrosiaLuckCube1"] = AmbrosiaUpgrade(
-            name="Ambrosia Quark-Cube Hybrid Module I",
-            cost=lambda x: base_cost_formula(level=x, base=250, power=3),
-            cubes=lambda n, y: 1 + 0.0002 * n * y,
-            max_level=25,
-        )
-        amb["ambrosiaQuarkCube1"] = AmbrosiaUpgrade(
-            name="Ambrosia Quark-Cube Hybrid Module I",
-            cost=lambda x: base_cost_formula(level=x, base=250, power=3),
-            cubes=lambda n, y: 1
-            + (0.0005 * n * math.floor((math.log10(y + 1) + 1) ** 2)),
-            max_level=25,
-        )
-        amb["ambrosiaCubeLuck1"] = AmbrosiaUpgrade(
-            name="Ambrosia Cube-Luck Hybrid Module I",
-            cost=lambda x: base_cost_formula(level=x, base=100, power=3),
-            luck=lambda n, y: 0.02 * n * y,
-            max_level=25,
-        )
-        amb["ambrosiaQuarkLuck1"] = AmbrosiaUpgrade(
-            name="Ambrosia Quark-Cube Hybrid Module I",
-            cost=lambda x: base_cost_formula(level=x, base=100, power=3),
-            luck=lambda n, y: 0.02 * n * math.floor((math.log10(y + 1) + 1) ** 2),
-            max_level=25,
-        )
+        self.levels[2] = {
+            "ambrosiaCubeQuark1": AmbrosiaUpgrade(
+                name="Ambrosia Cube-Quark Hybrid Module I",
+                cost=lambda x: base_cost_formula(level=x, base=500, power=3),
+                quarks=lambda n, y: 1 + 0.0001 * n * y,
+                max_level=25,
+                requirements={"ambrosiaCubes1": 20, "ambrosiaQuarks1": 30},
+            ),
+            "ambrosiaLuckQuark1": AmbrosiaUpgrade(
+                name="Ambrosia Cube-Quark Hybrid Module I",
+                cost=lambda x: base_cost_formula(level=x, base=500, power=3),
+                quarks=lambda n, y: 1 + 0.0001 * n * min(y, 1000**0.5 * y**0.5),
+                max_level=25,
+                requirements={"ambrosiaLuck1": 20, "ambrosiaQuarks1": 30},
+            ),
+            "ambrosiaLuckCube1": AmbrosiaUpgrade(
+                name="Ambrosia Quark-Cube Hybrid Module I",
+                cost=lambda x: base_cost_formula(level=x, base=250, power=3),
+                cubes=lambda n, y: 1 + 0.0002 * n * y,
+                max_level=25,
+                requirements={"ambrosiaLuck1": 20, "ambrosiaCubes1": 30},
+            ),
+            "ambrosiaQuarkCube1": AmbrosiaUpgrade(
+                name="Ambrosia Quark-Cube Hybrid Module I",
+                cost=lambda x: base_cost_formula(level=x, base=250, power=3),
+                cubes=lambda n, y: 1
+                + (0.0005 * n * math.floor((math.log10(y + 1) + 1) ** 2)),
+                max_level=25,
+                requirements={"ambrosiaQuarks1": 20, "ambrosiaCubes1": 30},
+            ),
+            "ambrosiaCubeLuck1": AmbrosiaUpgrade(
+                name="Ambrosia Cube-Luck Hybrid Module I",
+                cost=lambda x: base_cost_formula(level=x, base=100, power=3),
+                luck=lambda n, y: 0.02 * n * y,
+                max_level=25,
+                requirements={"ambrosiaCubes1": 20, "ambrosiaLuck1": 30},
+            ),
+            "ambrosiaQuarkLuck1": AmbrosiaUpgrade(
+                name="Ambrosia Quark-Cube Hybrid Module I",
+                cost=lambda x: base_cost_formula(level=x, base=100, power=3),
+                luck=lambda n, y: 0.02 * n * math.floor((math.log10(y + 1) + 1) ** 2),
+                max_level=25,
+                requirements={"ambrosiaQuarks1": 20, "ambrosiaLuck1": 30},
+            ),
+        }
+        self.ambrosiaCubeQuark1 = self.levels[2]["ambrosiaCubeQuark1"]
+        self.ambrosiaLuckQuark1 = self.levels[2]["ambrosiaLuckQuark1"]
+
+        self.ambrosiaQuarkCube1 = self.levels[2]["ambrosiaQuarkCube1"]
+        self.ambrosiaLuckCube1 = self.levels[2]["ambrosiaLuckCube1"]
+
+        self.ambrosiaQuarkLuck1 = self.levels[2]["ambrosiaQuarkLuck1"]
+        self.ambrosiaCubeLuck1 = self.levels[2]["ambrosiaCubeLuck1"]
         ####==========###
         # LEVEL 4     ###
         ####===========##
-        amb["ambrosiaQuarks2"] = AmbrosiaUpgrade(
-            name="Ambrosia Quark Module II",
-            cost=lambda x: base_cost_formula(level=x, base=500, power=2),
-            quarks=lambda n, y: 1 + (0.01 + (y // 10) / 1000) * n,
-            max_level=100,
-        )
-        amb["ambrosiaCubes2"] = AmbrosiaUpgrade(
-            name="Ambrosia Cube Module II",
-            cost=lambda x: base_cost_formula(level=x, base=500, power=2),
-            cubes=lambda n, y: (1 + (0.06 + 6 * (math.floor(y / 10) / 1000)) * n)
-            * math.pow(1.13, math.floor(n / 10)),
-            max_level=100,
-        )
-        amb["ambrosiaLuck2"] = AmbrosiaUpgrade(
-            name="Ambrosia Luck Module II",
-            cost=lambda x: base_cost_formula(level=x, base=250, power=2),
-            luck=lambda n, y: (3 + 0.3 * (y // 10)) * n + 40 * (n // 10),
-            max_level=100,
-        )
-        self._ambrosia_upgrades = amb
+        self.levels[3] = {
+            "ambrosiaQuarks2": AmbrosiaUpgrade(
+                name="Ambrosia Quark Module II",
+                cost=lambda x: base_cost_formula(level=x, base=500, power=2),
+                quarks=lambda n, y: 1 + (0.01 + (y // 10) / 1000) * n,
+                max_level=100,
+            ),
+            "ambrosiaCubes2": AmbrosiaUpgrade(
+                name="Ambrosia Cube Module II",
+                cost=lambda x: base_cost_formula(level=x, base=500, power=2),
+                cubes=lambda n, y: (1 + (0.06 + 6 * (math.floor(y / 10) / 1000)) * n)
+                * math.pow(1.13, math.floor(n / 10)),
+                max_level=100,
+            ),
+            "ambrosiaLuck2": AmbrosiaUpgrade(
+                name="Ambrosia Luck Module II",
+                cost=lambda x: base_cost_formula(level=x, base=250, power=2),
+                luck=lambda n, y: (3 + 0.3 * (y // 10)) * n + 40 * (n // 10),
+                max_level=100,
+            ),
+        }
+        self.ambrosiaQuarks2 = self.levels[3]["ambrosiaQuarks2"]
+        self.ambrosiaCubes2 = self.levels[3]["ambrosiaCubes2"]
+        self.ambrosiaLuck2 = self.levels[3]["ambrosiaLuck2"]
+
+        self._ambrosia_upgrades = {}
+        for level in self.levels:
+            for name, upgrade in self.levels[level].items():
+                self._ambrosia_upgrades[name] = upgrade
 
         cumulative_cost = {}
         for name, upgrade in self._ambrosia_upgrades.items():
@@ -304,11 +348,96 @@ class Ambrosia:
 
         self.cumulative_cost = cumulative_cost
 
+    def calculate(
+        self,
+        ambrosia,
+        loadout: Literal["quarks", "cubes", "luck", "octeracts"],
+        method: Literal["exact", "greedy"],
+        optimize=False,
+        pre_boughts=None,
+    ):
+
+        best_loadout = {}
+        if method == "exact":
+            if loadout == "quarks":
+                best_loadout = self.best_quark_loadout_exact(
+                    ambrosia=ambrosia,
+                    optimize=optimize,
+                    pre_boughts=pre_boughts,
+                )
+            elif loadout == "cubes":
+                best_loadout = self.best_cube_loadout_exact(
+                    ambrosia=ambrosia,
+                    optimize=optimize,
+                    pre_boughts=pre_boughts,
+                )
+            elif loadout == "luck":
+                if pre_boughts is None:
+                    pre_boughts = {}
+                if ambrosia > self.ambrosiaPatreon.cumulative_cost(self.ambrosiaPatreon.max_level):
+                    pre_boughts["ambrosiaPatreon"] = self.ambrosiaPatreon.max_level
+                best_loadout = self.best_luck_loadout_exact(
+                    ambrosia=ambrosia,
+                    optimize=optimize,
+                    pre_boughts=pre_boughts,
+                )
+            elif loadout == "octeracts":
+                p4x4 = self.p4x4
+                try:
+                    self.p4x4 = 0
+                    best_loadout = self.best_cube_loadout_exact(
+                        ambrosia=ambrosia,
+                        optimize=optimize,
+                        pre_boughts=pre_boughts,
+                    )
+                finally:
+                    self.p4x4 = p4x4
+
+        elif method == "greedy":
+            if loadout == "quarks":
+                best_loadout = self.best_quark_loadout_greedy(
+                    ambrosia=ambrosia,
+                    optimize=optimize,
+                    pre_boughts=pre_boughts,
+                )
+            elif loadout == "cubes":
+                best_loadout = self.best_cube_loadout_greedy(
+                    ambrosia=ambrosia,
+                    optimize=optimize,
+                    pre_boughts=pre_boughts,
+                )
+            elif loadout == "luck":
+                best_loadout = self.best_luck_loadout_greedy(
+                    ambrosia=ambrosia,
+                    optimize=optimize,
+                    pre_boughts=pre_boughts,
+                )
+            elif loadout == "octeracts":
+                best_loadout = self.best_octeract_loadout_greedy(
+                    ambrosia=ambrosia,
+                    optimize=optimize,
+                    pre_boughts=pre_boughts,
+                )
+        if "ambrosiaPatreon" not in loadout:
+            patreon_cost = self.ambrosiaPatreon.cumulative_cost(self.ambrosiaPatreon.max_level)
+            if ambrosia - self.calculate_price(best_loadout) > patreon_cost:
+                best_loadout["ambrosiaPatreon"] = self.ambrosiaPatreon.max_level
+        return self.sort_loadout(best_loadout)
+
+    def sort_loadout(self, loadout):
+        sorted_loadout = {}
+        for i in self.levels:
+            for name in self.levels[i]:
+                if name not in loadout:
+                    continue
+                sorted_loadout[name] = loadout[name]
+        return sorted_loadout
+
     def recursive_yield(
         self,
         ambrosia,
         levels,
-        ranges=None,
+        ranges,
         upgrades=None,
         pre_boughts=None,
         luck_restrictor=None,
@@ -323,22 +452,6 @@ class Ambrosia:
                 )
                 ambrosia -= spent_on_preboughts
 
-        if ranges is None:
-            ranges = {}
-            for level in levels:
-                start = 0
-                stop = self._ambrosia_upgrades[level].max_level
-                if pre_boughts is not None and level in pre_boughts:
-                    start = pre_boughts[level]
-                ranges[level] = [i for i in range(start, stop + 1)]
-                if level == "ambrosiaTutorial":
-                    if pre_boughts and level in pre_boughts:
-                        ranges[level] = [pre_boughts[level]]
-                    elif ambrosia > 100:
-                        ranges[level] = [
-                            self._ambrosia_upgrades["ambrosiaTutorial"].max_level
-                        ]
-
         if not levels:
             if ambrosia >= 0:
                 yield dict(upgrades)
@@ -347,63 +460,22 @@ class Ambrosia:
         name = levels[0]
         previous_level = upgrades.get(name, 0)
 
+        upgrade = self._ambrosia_upgrades[name]
         dependencies_met = True
         for level in ranges[name]:
             new_upgrades = dict(upgrades)
             new_upgrades[name] = level
 
-            # Check dependencies
+            for req_name, dependency_level in upgrade.requirements.items():
+                if new_upgrades.get(req_name, 0) < dependency_level:
+                    dependencies_met = False
+                    break
             if (
-                name == "ambrosiaQuarks1"
-                and new_upgrades.get("ambrosiaTutorial", 0) < 10
-            ):
-                dependencies_met = False
-            elif (
-                name == "ambrosiaCubes1"
-                and new_upgrades.get("ambrosiaTutorial", 0) < 10
-            ):
-                dependencies_met = False
-            elif (
-                name == "ambrosiaLuck1" and new_upgrades.get("ambrosiaTutorial", 0) < 10
-            ):
-                dependencies_met = False
-            elif (
                 name == "ambrosiaLuck1"
                 and luck_restrictor
                 and level > new_upgrades.get(luck_restrictor, 0) + 20
             ):
-                dependencies_met = False
-            elif name == "ambrosiaCubeQuark1" and (
-                new_upgrades.get("ambrosiaQuarks1", 0) < 30
-                or new_upgrades.get("ambrosiaCubes1", 0) < 20
-            ):
-                dependencies_met = False
-            elif name == "ambrosiaLuckQuark1" and (
-                new_upgrades.get("ambrosiaQuarks1", 0) < 30
-                or new_upgrades.get("ambrosiaLuck1", 0) < 20
-            ):
-                dependencies_met = False
-            elif name == "ambrosiaLuckCube1" and (
-                new_upgrades.get("ambrosiaCubes1", 0) < 30
-                or new_upgrades.get("ambrosiaLuck1", 0) < 20
-            ):
-                dependencies_met = False
-            elif name == "ambrosiaQuarkCube1" and (
-                new_upgrades.get("ambrosiaCubes1", 0) < 30
-                or new_upgrades.get("ambrosiaQuarks1", 0) < 20
-            ):
-                dependencies_met = False
-            elif (
-                name == "ambrosiaQuarks2"
-                and new_upgrades.get("ambrosiaQuarks1", 0) < 40
-            ):
-                dependencies_met = False
-            elif (
-                name == "ambrosiaCubes2" and new_upgrades.get("ambrosiaCubes1", 0) < 40
-            ):
-                dependencies_met = False
-            elif name == "ambrosiaLuck2" and new_upgrades.get("ambrosiaLuck1", 0) < 40:
-                dependencies_met = False
+                    dependencies_met = False
             if not dependencies_met and level > 0:
                 break
 
@@ -416,37 +488,13 @@ class Ambrosia:
             yield from self.recursive_yield(
                 ambrosia=new_ambrosia,
                 levels=levels[1:],
-                upgrades=new_upgrades,
-                ranges=ranges,
+                upgrades=dict(new_upgrades),
+                ranges=dict(ranges),
                 luck_restrictor=luck_restrictor,
             )
 
-    def get_upgrade(self, name):
+    def upgrade(self, name):
         return self._ambrosia_upgrades.get(name, None)
-
-    def calculate_preboughts_for_quarks(self, ambrosia):
-
-        pre_bought = {}
-        tutorial = self._ambrosia_upgrades["ambrosiaTutorial"]
-        remaining_ambro = ambrosia
-
-        tutorial_cost = 0
-        for level in range(0, tutorial.max_level + 1):
-            tutorial_cost = tutorial.cumulative_cost(level)
-            if tutorial_cost <= remaining_ambro:
-                pre_bought["ambrosiaTutorial"] = level
-        remaining_ambro -= tutorial_cost
-
-        if not remaining_ambro:
-            return pre_bought
-        if remaining_ambro >= 100_000:
-            pre_bought["ambrosiaLuck1"] = 20
-            pre_bought["ambrosiaCubes1"] = 20
-            pre_bought["ambrosiaQuarks1"] = 30
-        if remaining_ambro >= 200_000:
-            pre_bought["ambrosiaQuarks1"] = 40
-            # pre_bought["ambrosiaQuarks2"] = 10
-        return pre_bought
 
     def calculate_preboughts_for_cubes(self, ambrosia):
 
@@ -497,331 +545,209 @@ class Ambrosia:
             pre_bought["ambrosiaCubes1"] = 90
         return pre_bought
 
-    def calculate_preboughts_for_luck(self, ambrosia):
+    def _helper_loadout_exact(self, ambrosia, pre_boughts, names, bonus_type, luck_restrictor=None):
+        max_levels = {name: self._ambrosia_upgrades[name].max_level for name in names}
 
-        pre_bought = {}
-        tutorial = self._ambrosia_upgrades["ambrosiaTutorial"]
-        remaining_ambro = ambrosia
+        ranges = {}
+        for name in names:
+            start = pre_boughts.get(name, 0) if pre_boughts else 0
+            stop = max_levels[name]
+    
+            # General default range
+            range_ = range(start, stop + 1)
+            if name == "ambrosiaQuarks1":
+                range_ = [0, 20]
+                if pre_boughts and "ambrosiaQuarks1" in pre_boughts:
+                    range_ = [pre_boughts["ambrosiaQuarks1"]]
+            elif name == "ambrosiaCubes1":
+                range_ = [0, 20]
+                if pre_boughts and "ambrosiaCubes1" in pre_boughts:
+                    range_ = [pre_boughts["ambrosiaCubes1"]]
+            elif name == "ambrosiaLuck1":
+                range_ = range(20, stop + 1)
+                if pre_boughts and "ambrosiaLuck1" in pre_boughts:
+                    range_ = [0] + [pre_boughts["ambrosiaLuck1"]]
+            elif name == "ambrosiaTutorial":
+                max_cost = self.cumulative_cost[name][stop]
+                start = 0
+                if ambrosia > max_cost:
+                    start = stop
+                if pre_boughts and "ambrosiaTutorial" in pre_boughts:
+                    start = pre_boughts["ambrosiaTutorial"]
+                range_ = range(start, stop + 1)
+            elif name == "ambrosiaHyperflux":
+                range_ = [0]
+                if self.p4x4 > 0:
+                    if pre_boughts and "ambrosiaHyperflux" in pre_boughts:
+                        start = pre_boughts["ambrosiaHyperflux"]
+                    range_ = range(start, stop + 1)
+            ranges[name] = list(range_)
 
-        tutorial_cost = 0
-        for level in range(0, tutorial.max_level + 1):
-            tutorial_cost = tutorial.cumulative_cost(level)
-            if tutorial_cost <= remaining_ambro:
-                pre_bought["ambrosiaTutorial"] = level
-        remaining_ambro -= tutorial_cost
+        rname = "cubes" if bonus_type == "octeract" else bonus_type
+        for level in [1, 2]:
+            name = f"ambrosia{rname.capitalize()}{level}"
+            start = 0
+            if pre_boughts and name in pre_boughts:
+                start = pre_boughts[name]
+            ranges[name] = list(range(start,max_levels[name]+1))
 
-        if not remaining_ambro:
-            return pre_bought
-        if remaining_ambro >= 100_000:
-            pre_bought["ambrosiaLuck1"] = 30
-            pre_bought["ambrosiaCubes1"] = 20
-            pre_bought["ambrosiaQuarks1"] = 20
-        if remaining_ambro >= 200_000:
-            pre_bought["ambrosiaLuck1"] = 40
-            # pre_bought["ambrosiaQuarks2"] = 10
-        return pre_bought
-
-    def calculate(
-        self,
-        loadout,
-        ambrosia,
-        quarks,
-        luck_base,
-        luck_mult,
-        ooms,
-        p4x4=40,
-        use_preboughts=True,
-    ):
+        loadouts = self.recursive_yield(
+            ambrosia=ambrosia,
+            levels=names,
+            pre_boughts=pre_boughts,
+            ranges=ranges,
+            luck_restrictor=luck_restrictor
+        )
 
         best_loadout = {}
-        pre_boughts = None
-        if loadout == "quarks":
-            if use_preboughts:
-                pre_boughts = self.calculate_preboughts_for_quarks(ambrosia)
-            best_loadout = self.best_quark_loadout_exact(
-                ambrosia=ambrosia,
-                pre_boughts=pre_boughts,
-                luck_base=luck_base,
-                luck_mult=luck_mult,
-                ooms=ooms,
-            )
-        elif loadout == "cubes":
-            if use_preboughts:
-                pre_boughts = self.calculate_preboughts_for_cubes(ambrosia)
-            best_loadout = self.best_cube_loadout_exact(
-                ambrosia=ambrosia,
-                pre_boughts=pre_boughts,
-                luck_base=luck_base,
-                luck_mult=luck_mult,
-                quarks=quarks,
-                p4x4=p4x4,
-            )
-        elif loadout == "luck":
-            if use_preboughts:
-                pre_boughts = self.calculate_preboughts_for_luck(ambrosia)
-            best_loadout = self.best_luck_loadout_exact(
-                ambrosia=ambrosia,
-                pre_boughts=pre_boughts,
-                luck_base=luck_base,
-                luck_mult=luck_mult,
-                ooms=ooms,
-                quarks=quarks,
-            )
-        elif loadout == "octeracts":
-            if use_preboughts:
-                pre_boughts = self.calculate_preboughts_for_cubes(ambrosia)
-            best_loadout = self.best_cube_loadout_exact(
-                ambrosia=ambrosia,
-                pre_boughts=pre_boughts,
-                luck_base=luck_base,
-                luck_mult=luck_mult,
-                quarks=quarks,
-                p4x4=0,
-            )
-        return best_loadout
-
-    def best_quark_loadout_exact(
-        self, ambrosia, ooms, luck_base, luck_mult, pre_boughts=None
-    ):
-
-        names = [
-            "ambrosiaTutorial",
-            "ambrosiaQuarks1",
-            "ambrosiaCubes1",
-            "ambrosiaCubeQuark1",
-            "ambrosiaLuck1",
-            "ambrosiaLuckQuark1",
-            "ambrosiaQuarks2",
-        ]
-        ranges = {}
-        for name in names:
-            start = 0
-            stop = self._ambrosia_upgrades[name].max_level
-            if pre_boughts is not None and name in pre_boughts:
-                start = pre_boughts[name]
-            ranges[name] = [i for i in range(start, stop + 1)]
-            if name == "ambrosiaCubes1":
-                if pre_boughts and name in pre_boughts:
-                    ranges[name] = [pre_boughts[name]]
-                else:
-                    ranges[name] = [0, 20]
-            if name == "ambrosiaLuck1":
-                start_1 = 20
-                if pre_boughts and name in pre_boughts:
-                    start_1 = pre_boughts.get(name, 20)
-                ranges[name] = [0] + [i for i in range(start_1, stop + 1)]
-            if name == "ambrosiaTutorial":
-                if pre_boughts and name in pre_boughts:
-                    ranges[name] = [pre_boughts[name]]
-                elif ambrosia > 100:
-                    ranges[name] = [
-                        self._ambrosia_upgrades["ambrosiaTutorial"].max_level
-                    ]
-
-        generator = self.recursive_yield(
-            ambrosia=ambrosia,
-            levels=names,
-            pre_boughts=pre_boughts,
-            ranges=ranges,
-            luck_restrictor="ambrosiaCubeQuark1",
-        )
-
-        best_loadout = {name: 0 for name in names}
-        best_quark_bonus = 0
-        for affordable_levels in generator:
-            quark_bonus = 1
-            for name, max_level in affordable_levels.items():
-                ambrosia_upgrade = self._ambrosia_upgrades[name]
-                if name == "ambrosiaLuckQuark1":
-                    luck = luck_base
-                    luck += self._ambrosia_upgrades["ambrosiaLuck1"].luck(
-                        affordable_levels["ambrosiaLuck1"]
-                    )
-                    quark_bonus *= ambrosia_upgrade.quarks(
-                        max_level, luck * (1 + luck_mult)
-                    )
-                elif name == "ambrosiaCubeQuark1":
-                    quark_bonus *= ambrosia_upgrade.quarks(max_level, ooms)
-                elif name == "ambrosiaQuarks2":
-                    quark_bonus *= ambrosia_upgrade.quarks(
-                        max_level, affordable_levels["ambrosiaQuarks1"]
-                    )
-                else:
-                    quark_bonus *= ambrosia_upgrade.quarks(max_level)
-                if quark_bonus < best_quark_bonus:
-                    continue
-                best_quark_bonus = quark_bonus
-                best_loadout = {k: v for (k, v) in affordable_levels.items()}
-        return best_loadout
-
-    def best_cube_loadout_exact(
-        self, ambrosia, quarks, luck_base, luck_mult, p4x4=40, pre_boughts=None
-    ):
-
-        names = [
-            "ambrosiaHyperflux",
-            "ambrosiaTutorial",
-            "ambrosiaCubes1",
-            "ambrosiaQuarks1",
-            "ambrosiaQuarkCube1",
-            "ambrosiaLuck1",
-            "ambrosiaLuckCube1",
-            "ambrosiaCubes2",
-        ]
-        ranges = {}
-        for name in names:
-            start = 0
-            stop = self._ambrosia_upgrades[name].max_level
-            if pre_boughts is not None and name in pre_boughts:
-                start = pre_boughts[name]
-            ranges[name] = [i for i in range(start, stop + 1)]
-            if name == "ambrosiaQuarks1":
-                if pre_boughts and name in pre_boughts:
-                    ranges[name] = [pre_boughts[name]]
-                else:
-                    ranges[name] = [0, 20]
-            if name == "ambrosiaLuck1":
-                start_1 = 20
-                if pre_boughts and name in pre_boughts:
-                    start_1 = pre_boughts.get(name, 20)
-                # ranges[name] = [0] + [i for i in range(start_1, stop + 1)]
-                ranges[name] = [0] + [start_1]
-            if name == "ambrosiaTutorial":
-                if pre_boughts and name in pre_boughts:
-                    ranges[name] = [pre_boughts[name]]
-                elif ambrosia > 100:
-                    ranges[name] = [
-                        self._ambrosia_upgrades["ambrosiaTutorial"].max_level
-                    ]
-        if p4x4 == 0:
-            ranges["ambrosiaHyperflux"] = [0]
-
-        generator = self.recursive_yield(
-            ambrosia=ambrosia,
-            levels=names,
-            pre_boughts=pre_boughts,
-            ranges=ranges,
-            luck_restrictor="ambrosiaQuarkCube1",
-        )
-
-        best_loadout = {name: 0 for name in names}
-        best_cubes_bonus = 0
-        for loadout in generator:
-            bonus = self.calculate_bonus(
-                loadout=loadout,
-                quarks=quarks,
-                luck_base=luck_base,
-                luck_mult=luck_mult,
-                p4x4=p4x4,
-            )
-            if bonus["cubes"] <= best_cubes_bonus:
+        best_bonus = 0 if bonus_type == "luck" else 1
+        for i, loadout in enumerate(loadouts):
+            bonus = self.calculate_bonus(loadout)[bonus_type]
+            if bonus < best_bonus:
                 continue
-            best_cubes_bonus = bonus["cubes"]
-            best_loadout = dict(loadout)
+            best_bonus = bonus
+            best_loadout = loadout
         return best_loadout
 
-    def best_luck_loadout_exact(
-        self, ambrosia, ooms, quarks, luck_base, luck_mult, pre_boughts=None
-    ):
-
+    def best_quark_loadout_exact(self, ambrosia, pre_boughts=None, optimize=False):
         names = [
-            "ambrosiaTutorial",
-            "ambrosiaQuarks1",
-            "ambrosiaCubes1",
-            "ambrosiaLuck1",
-            "ambrosiaQuarkLuck1",
-            "ambrosiaCubeLuck1",
-            "ambrosiaLuck2",
+            "ambrosiaTutorial", "ambrosiaQuarks1", "ambrosiaCubes1", 
+            "ambrosiaCubeQuark1", "ambrosiaLuck1", "ambrosiaLuckQuark1", 
+            "ambrosiaQuarks2"
         ]
-        ranges = {}
-        for name in names:
-            start = 0
-            stop = self._ambrosia_upgrades[name].max_level
-            if pre_boughts is not None and name in pre_boughts:
-                start = pre_boughts[name]
-            ranges[name] = [i for i in range(start, stop + 1)]
-            if name == "ambrosiaCubes1":
-                if pre_boughts and name in pre_boughts:
-                    ranges[name] = [pre_boughts[name]]
-                else:
-                    ranges[name] = [0, 20]
-            if name == "ambrosiaQuarks1":
-                if pre_boughts and name in pre_boughts:
-                    ranges[name] = [pre_boughts[name]]
-                else:
-                    ranges[name] = [0, 20]
-            if name == "ambrosiaTutorial":
-                if pre_boughts and name in pre_boughts:
-                    ranges[name] = [pre_boughts[name]]
-                elif ambrosia > 100:
-                    ranges[name] = [
-                        self._ambrosia_upgrades["ambrosiaTutorial"].max_level
-                    ]
 
-        generator = self.recursive_yield(
-            ambrosia=ambrosia,
-            levels=names,
-            pre_boughts=pre_boughts,
-            ranges=ranges,
+        def calculate_preboughts_for_quarks(ambrosia):
+
+            pre_bought = {}
+            tutorial = self._ambrosia_upgrades["ambrosiaTutorial"]
+            remaining_ambro = ambrosia
+
+            tutorial_cost = 0
+            for level in range(0, tutorial.max_level + 1):
+                tutorial_cost = tutorial.cumulative_cost(level)
+                if tutorial_cost <= remaining_ambro:
+                    pre_bought["ambrosiaTutorial"] = level
+            remaining_ambro -= tutorial_cost
+
+            if not remaining_ambro:
+                return pre_bought
+            if remaining_ambro >= 100_000:
+                pre_bought["ambrosiaLuck1"] = 20
+                pre_bought["ambrosiaCubes1"] = 20
+                pre_bought["ambrosiaQuarks1"] = 30
+            if remaining_ambro >= 200_000:
+                pre_bought["ambrosiaQuarks1"] = 40
+                # pre_bought["ambrosiaQuarks2"] = 10
+            return pre_bought
+
+        if optimize:
+            if pre_boughts is None:
+                pre_boughts = {}
+            pre_boughts = {**calculate_preboughts_for_quarks(ambrosia), **pre_boughts}
+
+        return self._helper_loadout_exact(
+            ambrosia, pre_boughts, names, "quarks",
+            luck_restrictor="ambrosiaCubeQuark1"
+        )
+    
+    def best_cube_loadout_exact(self, ambrosia, pre_boughts=None, optimize=False):
+        names = [
+            "ambrosiaHyperflux", "ambrosiaTutorial", "ambrosiaCubes1", 
+            "ambrosiaQuarks1", "ambrosiaQuarkCube1", "ambrosiaLuck1", 
+            "ambrosiaLuckCube1", "ambrosiaCubes2"
+        ]
+
+        if optimize:
+            if pre_boughts is None:
+                pre_boughts = {}
+            pre_boughts = {**self.calculate_preboughts_for_cubes(ambrosia), **pre_boughts}
+
+        return self._helper_loadout_exact(
+            ambrosia, pre_boughts, names, "cubes",
+            luck_restrictor="ambrosiaQuarkCube1"
+        )
+    
+    def best_luck_loadout_exact(self, ambrosia, pre_boughts=None, optimize=False):
+        names = [
+            "ambrosiaTutorial", "ambrosiaQuarks1", "ambrosiaCubes1",
+            "ambrosiaLuck1", "ambrosiaQuarkLuck1", "ambrosiaCubeLuck1",
+            "ambrosiaLuck2"
+        ]
+
+        def calculate_preboughts_for_luck(ambrosia):
+
+            pre_bought = {}
+            tutorial = self._ambrosia_upgrades["ambrosiaTutorial"]
+            remaining_ambro = ambrosia
+
+            tutorial_cost = 0
+            for level in range(0, tutorial.max_level + 1):
+                tutorial_cost = tutorial.cumulative_cost(level)
+                if tutorial_cost <= remaining_ambro:
+                    pre_bought["ambrosiaTutorial"] = level
+            remaining_ambro -= tutorial_cost
+
+            if not remaining_ambro:
+                return pre_bought
+            if remaining_ambro >= 100_000:
+                pre_bought["ambrosiaLuck1"] = 30
+                pre_bought["ambrosiaCubes1"] = 20
+                pre_bought["ambrosiaQuarks1"] = 20
+            if remaining_ambro >= 200_000:
+                pre_bought["ambrosiaLuck1"] = 40
+                # pre_bought["ambrosiaQuarks2"] = 10
+            return pre_bought
+
+        if optimize:
+            if pre_boughts is None:
+                pre_boughts = {}
+            pre_boughts = {**calculate_preboughts_for_luck(ambrosia), **pre_boughts}
+
+
+        return self._helper_loadout_exact(
+            ambrosia, pre_boughts, names, "luck",
+        )
+    
+    def best_octeract_loadout_exact(self, ambrosia, pre_boughts=None, optimize=False):
+        names = [
+            "ambrosiaTutorial", "ambrosiaCubes1", 
+            "ambrosiaQuarks1", "ambrosiaQuarkCube1", "ambrosiaLuck1", 
+            "ambrosiaLuckCube1", "ambrosiaCubes2"
+        ]
+
+        if optimize:
+            if pre_boughts is None:
+                pre_boughts = {}
+            pre_boughts = {**self.calculate_preboughts_for_cubes(ambrosia), **pre_boughts}
+            if "ambrosiaHyperflux" in pre_boughts:
+                pre_boughts["ambrosiaHyperflux"] = [0]
+        
+        return self._helper_loadout_exact(
+            ambrosia, pre_boughts, names, "cubes",
+            luck_restrictor="ambrosiaQuarkCube1"
         )
 
-        best_loadout = {name: 0 for name in names}
-        best_luck_bonus = 0
-        for loadout in generator:
-            bonus = self.calculate_bonus(
-                loadout=loadout,
-                quarks=quarks,
-                ooms=ooms,
-                luck_base=luck_base,
-                luck_mult=luck_mult,
-            )
-            if bonus["luck"] <= best_luck_bonus:
-                continue
-            best_luck_bonus = bonus["luck"]
-            best_loadout = dict(loadout)
-        return best_loadout
+    def _helper_loadout_greedy(self, ambrosia, levels, to_max, pre_boughts=None):
 
-
-    def best_luck_loadout_greedy(
-        self, ambrosia, ooms, quarks, luck_base, luck_mult, pre_boughts=None
-    ):
-
-        if ambrosia <= 0:
+        remaining_ambrosia = ambrosia
+        if pre_boughts is not None:
+            remaining_ambrosia -= self.calculate_price(pre_boughts)
+        if remaining_ambrosia <= 0:
             return {}
-        best_loadout = {"ambrosiaPatreon": 1}
+
+        best_loadout = {}
+        if pre_boughts is not None:
+            best_loadout = pre_boughts
+
         choices = []
-
-        tutorial = self._ambrosia_upgrades["ambrosiaTutorial"]
-
-        cubes1 = self._ambrosia_upgrades["ambrosiaCubes1"]
-        luck1 = self._ambrosia_upgrades["ambrosiaLuck1"]
-        quarks1 = self._ambrosia_upgrades["ambrosiaQuarks1"]
-
-        quarkluck1 = self._ambrosia_upgrades["ambrosiaQuarkLuck1"]
-        cubeluck1 = self._ambrosia_upgrades["ambrosiaCubeLuck1"]
-
-        luck2 = self._ambrosia_upgrades["ambrosiaCubes2"]
-
-        round=0
+        round = 0
         while True:
-            round+=1
+            round += 1
             if choices:
                 next_loadout = {}
-                best_choice = {}
                 best_price_to_luck_ratio = 0
-                curr_luck_2 = best_loadout.get("ambrosiaLuck2", 0)
-                has40 = any(x.get("ambrosiaLuck2",0) + curr_luck_2>=10 for x in choices)
-                has40 = False
                 curr_price = self.calculate_price(best_loadout)
-                curr_bonus = self.calculate_bonus(
-                    best_loadout,
-                    ooms=ooms,
-                    quarks=quarks,
-                    luck_base=luck_base,
-                    luck_mult=luck_mult,
-                )
-                if has40:
-                    print("CURRENT LOADOUT: ", best_loadout)
+                curr_bonus = self.calculate_bonus(best_loadout)
                 for choice in choices:
                     if not choice:
                         continue
@@ -831,87 +757,225 @@ class Ambrosia:
                         new_level = loadout.get(name, 0) + level
                         loadout[name] = min(upgrade.max_level, new_level)
                     price = self.calculate_price(loadout)
-                    bonus = self.calculate_bonus(
-                        loadout,
-                        ooms=ooms,
-                        quarks=quarks,
-                        luck_base=luck_base,
-                        luck_mult=luck_mult,
+                    bonus = self.calculate_bonus(loadout)
+                    price_to_luck_ratio = (bonus[to_max] - curr_bonus[to_max]) / (
+                        price - curr_price
                     )
-                    price_to_luck_ratio = (bonus["luck"]-curr_bonus["luck"]) / (price - curr_price)
                     if price > ambrosia:
-                        if has40:
-                            print("DISQUALIFIED:", round, price_to_luck_ratio, choice)
                         continue
-                    elif has40:
-                        print("QUALIFIED:   ", round, price_to_luck_ratio, choice)
                     if price_to_luck_ratio < best_price_to_luck_ratio:
                         continue
-                    best_choice = choice
                     best_price_to_luck_ratio = price_to_luck_ratio
                     next_loadout = dict(loadout)
 
                 if next_loadout:
                     best_loadout = next_loadout
-                    if has40:
-                        print("WINNER       ", round, best_price_to_luck_ratio, best_choice)
-                        print("="*79)
                 else:
-                    if has40:
-                        print("NO WINNER")
-                        print("="*79)
                     break
 
             choices = []
             tutorial_level = best_loadout.get("ambrosiaTutorial", 0)
-            if tutorial_level < tutorial.max_level:
+            if tutorial_level < self.ambrosiaTutorial.max_level:
                 choices.append({"ambrosiaTutorial": 1})
                 continue
 
-            luck1_level = best_loadout.get("ambrosiaLuck1", 0)
-            if luck1_level < luck1.max_level:
-                choices.append({"ambrosiaLuck1": 1})
-                add_10 = math.ceil((luck1_level + 1) / 10) * 10 - luck1_level
-                if add_10 > 1:
-                    choices.append({"ambrosiaLuck1": add_10})
+            for level_group in sorted(levels):
+                for name in levels[level_group]:
+                    level = best_loadout.get(name, 0)
+                    upgrade = self._ambrosia_upgrades[name]
+                    if level >= upgrade.max_level:
+                        continue
 
-            quarks1_level = best_loadout.get("ambrosiaQuarks1", 0)
-            if best_loadout.get("ambrosiaQuarkLuck1", 0) < quarkluck1.max_level:
-                to_add = {
-                    "ambrosiaLuck1": max(0, 30 - luck1_level),
-                    "ambrosiaQuarks1": max(0, 20 - quarks1_level),
-                    "ambrosiaQuarkLuck1": 1,
-                }
-                choices.append(to_add)
+                    add_one = {name: 1}
+                    for req_name, req_level in upgrade.requirements.items():
+                        add_one[req_name] = max(
+                            0, req_level - best_loadout.get(req_name, 0)
+                        )
+                    choices.append(add_one)
+                    if level_group not in [1, 3]:
+                        continue
 
-            cubes1_level = best_loadout.get("ambrosiaCubes1", 0)
-            if best_loadout.get("ambrosiaCubeLuck1", 0) < cubeluck1.max_level:
-                to_add = {
-                    "ambrosiaLuck1": max(0, 30 - luck1_level),
-                    "ambrosiaCubes1": max(0, 20 - cubes1_level),
-                    "ambrosiaCubeLuck1": 1,
-                }
-                choices.append(to_add)
+                    next_multiple_of_ten = math.ceil((level + 1) / 10) * 10 - level
+                    if not (1 < next_multiple_of_ten <= upgrade.max_level - level):
+                        continue
 
-            luck2_level = best_loadout.get("ambrosiaLuck1", 0)
-            if luck2_level < luck2.max_level:
-                choices.append({"ambrosiaLuck2": 1, "ambrosiaLuck1": max(0, 40 - luck1_level)})
-                add_10 = math.ceil((luck2_level + 1) / 10) * 10 - luck2_level
-                if add_10 > 1:
-                    choices.append({"ambrosiaLuck2": add_10, "ambrosiaLuck1": max(0, 40 - luck1_level)})
+                    add_multiple = dict(add_one)
+                    add_multiple[name] = next_multiple_of_ten
+                    choices.append(add_multiple)
 
             if not choices:
                 break
         return best_loadout
 
+    def best_quark_loadout_greedy(self, ambrosia, pre_boughts=None, optimize=False):
+
+        levels = {
+            1: ["ambrosiaQuarks1", "ambrosiaLuck1"],
+            2: ["ambrosiaCubeQuark1", "ambrosiaLuckQuark1"],
+            3: ["ambrosiaQuarks2"],
+        }
+        best_loadout = self._helper_loadout_greedy(
+            ambrosia, levels=levels, to_max="quarks", pre_boughts=pre_boughts,
+        )
+        if not optimize:
+            return best_loadout
+        best_bonus = self.calculate_bonus(best_loadout)
+
+        ten_less_quark2_than_best = max(
+            best_loadout.get("ambrosiaQuarks2", 0) // 10 - 1, 0
+        )
+        for quark2 in range(ten_less_quark2_than_best, self.ambrosiaQuarks2.max_level+1, 10):
+            pre_boughts = {
+                "ambrosiaCubes1": 20,
+                "ambrosiaLuck1": 20,
+                "ambrosiaQuarks1": 40,
+                "ambrosiaQuarks2": quark2,
+            }
+            loadout = self._helper_loadout_greedy(
+                ambrosia, levels=levels, to_max="quarks", pre_boughts=pre_boughts
+            )
+            if not loadout:
+                break
+            bonus = self.calculate_bonus(loadout=loadout)
+            if bonus["quarks"] < best_bonus["quarks"]:
+                continue
+            best_loadout = loadout
+            best_bonus = bonus
+        return best_loadout
+
+    def best_luck_loadout_greedy(self, ambrosia, pre_boughts=None, optimize=False):
+
+        levels = {
+            1: ["ambrosiaLuck1"],
+            2: ["ambrosiaQuarkLuck1", "ambrosiaCubeLuck1"],
+            3: ["ambrosiaLuck2"],
+        }
+        best_loadout = self._helper_loadout_greedy(
+            ambrosia, levels=levels, to_max="luck", pre_boughts=None
+        )
+        if not optimize:
+            return best_loadout
+        best_bonus = self.calculate_bonus(best_loadout)
+
+        ten_less_luck2_than_best = max(
+            10*(best_loadout.get("ambrosiaLuck2", 0) // 10 - 1), 0
+        )
+        pre_boughts = {
+            "ambrosiaQuarks1": 20,
+            "ambrosiaCubes1": 20,
+            "ambrosiaLuck1": 40,
+        }
+        for luck2 in range(ten_less_luck2_than_best, self.ambrosiaCubes2.max_level+1, 10):
+            pre_boughts["ambrosiaLuck2"] =  luck2
+            loadout = self._helper_loadout_greedy(
+                ambrosia, levels=levels, to_max="luck", pre_boughts=pre_boughts
+            )
+            if not loadout:
+                break
+            bonus = self.calculate_bonus(loadout=loadout)
+            if bonus["luck"] < best_bonus["luck"]:
+                continue
+            best_loadout = loadout
+            best_bonus = bonus
+        return best_loadout
+
+    def best_cube_loadout_greedy(self, ambrosia, pre_boughts=None, optimize=False):
+
+        levels = {
+            0: ["ambrosiaHyperflux"],
+            1: ["ambrosiaCubes1", "ambrosiaLuck1"],
+            2: ["ambrosiaQuarkCube1", "ambrosiaLuckCube1"],
+            3: ["ambrosiaCubes2"],
+        }
+        best_loadout = self._helper_loadout_greedy(
+            ambrosia, levels=levels, to_max="cubes", pre_boughts=None
+        )
+        if not optimize:
+            return best_loadout
+        best_bonus = self.calculate_bonus(best_loadout)
+
+        ten_less_hyperflux_than_best = max(
+            best_loadout.get("ambrosiaHyperflux", 0) - 1, 0
+        )
+        ten_less_cube2_than_best = max(
+            best_loadout.get("ambrosiaCubes2", 0) // 10 - 1, 0
+        )
+        pre_boughts = {
+            "ambrosiaQuarks1": 20,
+            "ambrosiaLuck1": 20,
+            "ambrosiaCubes1": 40,
+        }
+        for hyperflux in range(
+            ten_less_hyperflux_than_best, self.ambrosiaHyperflux.max_level + 1
+        ):
+            pre_boughts["ambrosiaHyperflux"] = hyperflux
+            for cubes2 in range(
+                ten_less_cube2_than_best, self.ambrosiaCubes2.max_level + 1, 10
+            ):
+                pre_boughts["ambrosiaCubes2"] = cubes2
+
+                loadout = self._helper_loadout_greedy(
+                    ambrosia, levels=levels, to_max="cubes", pre_boughts=pre_boughts
+                )
+
+                if not loadout:
+                    break
+
+                bonus = self.calculate_bonus(loadout=loadout)
+
+                if bonus["cubes"] < best_bonus["cubes"]:
+                    continue
+
+                best_loadout = loadout
+                best_bonus = bonus
+        return best_loadout
+
+    def best_octeract_loadout_greedy(self, ambrosia, pre_boughts=None, optimize=True):
+
+        levels = {
+            1: ["ambrosiaCubes1", "ambrosiaLuck1"],
+            2: ["ambrosiaQuarkCube1", "ambrosiaLuckCube1"],
+            3: ["ambrosiaCubes2"],
+        }
+        best_loadout = self._helper_loadout_greedy(
+            ambrosia, levels=levels, to_max="cubes", pre_boughts=None
+        )
+        if not optimize:
+            return best_loadout
+        best_bonus = self.calculate_bonus(best_loadout)
+
+        ten_less_cube2_than_best = max(
+            10 * (best_loadout.get("ambrosiaCubes2", 0) // 10 - 1), 0
+        )
+        for cubes2 in range(
+            ten_less_cube2_than_best, self.ambrosiaCubes2.max_level + 1, 10
+        ):
+            pre_boughts = {
+                "ambrosiaQuarks1": 20,
+                "ambrosiaLuck1": 20,
+                "ambrosiaCubes1": 40,
+                "ambrosiaCubes2": i * 10,
+            }
+            loadout = self._helper_loadout_greedy(
+                ambrosia, levels=levels, to_max="cubes", pre_boughts=pre_boughts
+            )
+            if not loadout:
+                break
+            bonus = self.calculate_bonus(loadout=loadout)
+            if bonus["cubes"] < best_bonus["cubes"]:
+                continue
+            best_loadout = loadout
+            best_bonus = bonus
+        return best_loadout
+
     def calculate_bonus(
         self, loadout, quarks=None, ooms=None, luck_base=None, luck_mult=None, p4x4=None
     ):
-        ooms = 0 if ooms is None else ooms
-        quarks = 0 if quarks is None else quarks
-        luck_base = 0 if luck_base is None else luck_base
-        luck_mult = 0 if luck_mult is None else luck_mult
-        p4x4 = 0 if p4x4 is None else p4x4
+        ooms = self.ooms if ooms is None else ooms
+        quarks = self.quarks if quarks is None else quarks
+        luck_base = self.luck_base if luck_base is None else luck_base
+        luck_mult = self.luck_mult if luck_mult is None else luck_mult
+        p4x4 = self.p4x4 if p4x4 is None else p4x4
 
         bonuses = {"quarks": 1, "cubes": 1, "octeracts": 1, "luck": 0}
 
@@ -1003,14 +1067,13 @@ class SingularityUpgrade:
         excess_levels = self.free_level - self.level
         return self.max_level + math.sqrt(excess_levels)
 
-    def effective_level(self, softy: Optional[bool] = True):
+    def effective_level(self, softy: Optional[float] = 0.75):
         actual_free_levels = self.effective_free_level
         linear_levels = self.level + actual_free_levels
         polynomial_levels = 0
 
         if softy:
-            exponent = 0.75
-            polynomial_levels = math.pow(self.level * actual_free_levels, exponent)
+            polynomial_levels = math.pow(self.level * actual_free_levels, softy)
 
         return max(linear_levels, polynomial_levels)
 
@@ -1055,6 +1118,132 @@ class SingularityUpgrade:
         return math.ceil(self.cost_per_level * (1 + level) * cost_multiplier)
 
 
+
+def optimize_ambrosia_loadouts(loadouts: list[Literal["quarks", "cubes", "luck", "octeracts"]], ooms=None, quarks=None, path=Path.home() / "Downloads", threshold=0.2):
+    if ooms is None:
+        ooms = STATE.get("stats", {}).get("ooms", 100)
+    if quarks is None:
+        quarks = STATE.get("stats", {}).get("quarks", float("1e11"))
+
+    go_to_tab("singularity")
+    actions.click("subtab:ambrosia")
+    actions.click("subtab:ambrosia")
+
+    digits = {str(x): True for x in range(10)}
+
+    mode_text = ocr.text_in_rectangle("ambrosia:mode")
+    save_mode = "SAVE" in mode_text
+    load_mode = "LOAD" in mode_text
+
+    if save_mode:
+        actions.click("ambrosia:mode")
+
+    ambrosia_loadout = STATE["AMBROSIA_LOADOUT"]
+    if not ambrosia_loadout:
+        ambrosia_loadout = "max_cubes"
+    actions.perform_sequence("ambrosia:loadout:refund")
+
+    gain_and_luck_text = ocr.text_in_rectangle("ambrosia:gain_and_luck")
+    luck_text, mult_text = gain_and_luck_text.split()[-2:]
+    try:
+        base_luck = float("".join(x for x in luck_text if x in digits))
+    except ValueError:
+        base_luck = 1800
+
+    try:
+        parts = []
+        for text in mult_text.split(".", maxsplit=1):
+            parts.append("".join(x for x in text if x in digits))
+        base_multiplier=float(".".join(parts))/100
+    except ValueError:
+        base_multiplier=0
+
+    amb = Ambrosia(quarks=quarks, ooms=ooms, luck_base=base_luck, luck_mult=base_multiplier, p4x4=40)
+
+    loadouts_to_update = {}
+    current_loadouts = {}
+    for method in ["greedy"]:
+        for loadout in loadouts:
+            loadout_path = path / f"ambrosia_{loadout}"
+            current_loadouts[loadout] = {"price": 0, "bonus": 0 if loadout == "luck" else 1}
+            if not loadout_path.is_file():
+                continue
+            with loadout_path.open() as f: 
+                current_loadout = json.load(f)
+                current_loadouts[loadout]["bonus"] = amb.calculate_bonus(current_loadout)[loadout]
+                current_loadouts[loadout]["price"] = amb.calculate_price(current_loadout)
+    max_spent = max(current_loadouts[x]["price"] for x in current_loadouts)
+
+    text = ocr.text_in_rectangle("ambrosia:current_and_lifetime").lower()
+    last_part = ""
+    lifetime = 0
+    for delim in [":", "["]:
+        try:
+            last_part = text.split(":", maxsplit=1)[-1]
+            lifetime = int("".join(x for x in last_part if x in digits))
+            break
+        except ValueError:
+            pass
+    if max_spent <= 1:
+        max_spent = lifetime
+
+    if lifetime>float("2e6") or lifetime/max_spent - 1 > threshold:
+        lifetime //= 10
+
+    for loadout in loadouts:
+        calculated_loadout = amb.calculate(ambrosia=lifetime, loadout=loadout, method="greedy", optimize=True)
+        calculated_bonus = amb.calculate_bonus(calculated_loadout)[loadout]
+        current_loadout = current_loadouts.get(loadout, {})
+        if not current_loadout or (calculated_bonus > current_loadout.get("bonus", 0) and calculated_loadout != current_loadout):
+            with open(path / f"ambrosia_{loadout}", "w") as f: 
+                f.write(json.dumps(calculated_loadout))
+            loadouts_to_update[loadout] = calculated_loadout
+    
+    if not loadouts_to_update:
+        print("NO LOADOUTS TO UPDATE")
+        if ambrosia_loadout:
+            actions.perform_sequence(f"ambrosia:loadout:{ambrosia_loadout}")
+        return
+    print("LOADOUTS TO UPDATE")
+
+    if load_mode:
+        actions.click("ambrosia:mode")
+        save_mode = True
+        load_mode = False
+
+    actions.click("subtab:ambrosia")
+    ambrosia_loadout = STATE["AMBROSIA_LOADOUT"]
+    delay = 0.25
+    for loadout_name, upgrades in loadouts_to_update.items():
+        time.sleep(delay)
+        actions.perform_sequence("ambrosia:loadout:refund")
+        for level in amb.levels:
+            for name in amb.levels[level]:
+                to_buy = upgrades.get(name, 0)
+                if not to_buy:
+                    continue
+                time.sleep(delay)
+                #price = amb.cumulative_cost[name][to_buy]
+                #if to_buy > 5 + len(str(price)):
+                #    actions.perform_sequence(
+                #        f"ambrosia:buy:{name}:custom", 
+                #        input=f"{price}",
+                #    )
+                #    continue
+                actions.click(f"ambrosia:{name}", times=to_buy)
+        time.sleep(delay)
+        actions.perform_sequence(f"ambrosia:loadout:max_{loadout_name}")
+    time.sleep(delay)
+
+    if save_mode:
+        actions.click("ambrosia:mode")
+        load_mode = False
+        save_mode = True
+
+    if ambrosia_loadout:
+        actions.perform_sequence(f"ambrosia:loadout:{ambrosia_loadout}")
+
+    
 def naive_optimizer_singularity(
     gq=float("1e22"),
     free_cube_flame_levels=0,
@@ -1557,7 +1746,8 @@ def optimize_upgrade_spread_by_effect(
     return upgrade_spread, remaining_gq
 
 
-geometry = Geometry(config_file=str(Path(__file__).parent / "geometry.json"))
+geometry = Geometry(config_file=str(Path(__file__).parent / "geometry.json"), offset_x=-0.0032)
+#geometry = Geometry(config_file=str(Path(__file__).parent / "geometry.json"))
 # challenges
 space_between_sing_shop_items = 9
 
@@ -1820,6 +2010,48 @@ if s1x1 is not None and s1x1_level is not None:
             ],
         )
 
+s1x1 = geometry.get_rectangle(name="ambrosia:s1x1")
+w_space_between_ambrosia_items=9
+h_space_between_ambrosia_items=18
+amb = Ambrosia()
+if s1x1 is not None:
+    pairs = []
+    x_offset = 0
+    for y, level in enumerate(amb.levels, start=1):
+        for x, name in enumerate(amb.levels[level], start=1):
+            pairs.append([y, x, name])
+    for (y, x, name) in pairs:
+        x_offset = 0
+        if y in [2, 4]:
+            x_offset = 1
+        elif y == 3:
+            x_offset = -1/2
+        geometry.add_rectangle(
+            name=f"ambrosia:{name}",
+            x=s1x1.x + (x - 1 + x_offset) * (s1x1.width + w_space_between_ambrosia_items),
+            y=s1x1.y + (y - 1) * (s1x1.height + h_space_between_ambrosia_items),
+            width=s1x1.width,
+            height=s1x1.height,
+        )
+        actions.add_sequence(
+            f"ambrosia:buy:{name}:custom",
+            [
+                {
+                    "type": "click",
+                    "name": f"ambrosia:{name}",
+                    "modifiers": [Key.shift],
+                },
+                {"type": "type_text", "input_placeholder": True, "delay": 0.1},
+                {"type": "key_press", "button": "enter", "delay": 0.25},
+                {"type": "key_press", "button": "enter", "delay": 0.25},
+            ],
+        )
+        actions.add_sequence(
+            f"ambrosia:buy:{name}:x1",
+            [
+                {"type": "click", "name": f"ambrosia:{name}"},
+            ],
+        )
 # Time to build the cube subtab
 cubes = ["tributes", "gifts", "benedictions", "platonics"]
 wow_subtabs = cubes + ["upgrades:cubes", "upgrades:platonic", "forge"]
@@ -1931,28 +2163,25 @@ actions.add_sequence(
     [
         {"type": "click", "name": "subtab:challenges_exalt"},
         {"type": "click", "name": "exalt:4"},
-        {"type": "key_press", "button": "enter", "delay": 0.1},
-        {"type": "key_press", "button": "enter", "delay": 0.1},
-        {"type": "key_press", "button": "enter", "delay": 0.1},
-        {"type": "key_press", "button": "enter", "delay": 0.1},
-        {"type": "key_press", "button": "enter", "delay": 0.1},
-        {"type": "key_press", "button": "enter", "delay": 0.1},
+        {"type": "key_press", "button": "enter", "delay": 0.3},
+        {"type": "click", "name": "stats_for_nerds:savefile:ok", "delay": 0.2},
+        {"type": "key_press", "button": "enter", "delay": 0.2},
+        {"type": "click", "name": "stats_for_nerds:savefile:ok", "delay": 0.2},
+        {"type": "key_press", "button": "enter", "delay": 0.2},
+        {"type": "click", "name": "stats_for_nerds:savefile:ok", "delay": 0.2},
         {"type": "click", "name": "tab:challenges:C9"},
         {"type": "click", "name": "subtab:challenges_exalt"},
         {"type": "click", "name": "exalt:4"},
-        {"type": "key_press", "button": "enter", "delay": 0.1},
-        {"type": "key_press", "button": "enter", "delay": 0.1},
-        {"type": "key_press", "button": "enter", "delay": 0.1},
-        {"type": "key_press", "button": "enter", "delay": 0.1},
-        {"type": "key_press", "button": "enter", "delay": 0.1},
-        {"type": "key_press", "button": "enter", "delay": 0.1},
+        {"type": "key_press", "button": "enter", "delay": 0.5},
+        {"type": "key_press", "button": "enter", "delay": 1},
+        {"type": "key_press", "button": "c"},
+        {"type": "key_press", "button": "enter", "delay": 1},
+        {"type": "key_press", "button": "enter", "delay": 1},
+        {"type": "key_press", "button": "enter", "delay": 1},
+        {"type": "key_press", "button": "c"},
     ],
 )
 
-
-def reset_current_sing():
-    go_to_tab("challenges")
-    actions.perform_sequence("reset_current_sing")
 
 
 # AMBROSIA
@@ -1975,6 +2204,23 @@ for i, loadout_name in enumerate(loadouts, start=1):
             {"type": "key_press", "button": "enter"},
         ],
     )
+actions.add_sequence(
+    f"ambrosia:loadout:refund",
+    [
+        {"type": "click", "name": "ambrosia:refund"},
+        {"type": "key_press", "button": "enter"},
+    ],
+)
+actions.add_sequence(
+    f"ambrosia:loadout:from_file",
+    [
+        {"type": "click", "name": "ambrosia:load_from_file", "delay": 1},
+        {"type": "type_text", "input_placeholder": True, "delay": 1},
+        #{"type": "key_press", "button": "enter", "delay": 0.1},
+        #{"type": "key_press", "button": "enter", "delay": 0.1},
+    ],
+)
+
 # ===========================================================================
 #    WOW! Cubes
 # ===========================================================================
@@ -2054,6 +2300,15 @@ actions.add_sequence(
         {"type": "type_text", "input_placeholder": True},
         {"type": "key_press", "button": "enter", "delay": 0.1},
         {"type": "key_press", "button": "enter", "delay": 0.1},
+    ],
+)
+actions.add_sequence(
+    "stats_for_nerds:savefile",
+    [
+        {"type": "click", "name": "subtab:stats_for_nerds"},
+        {"type": "click", "name": "stats_for_nerds:savefile:1"},
+        {"type": "click", "name": "stats_for_nerds:savefile:2"},
+        {"type": "click", "name": "stats_for_nerds:savefile:ok"},
     ],
 )
 # ===========================================================================
@@ -2281,17 +2536,68 @@ def check_ambrosia(default="max_cubes"):
         go_to_tab("singularity")
         actions.click("subtab:ambrosia")
         STATE["TIME_TO_LUCK"] = time_to_full_ambrosia_bar()
-    remaining_time = STATE["TIME_TO_LUCK"] - time.time()
 
     changed_tab = False
-    if 0 < remaining_time < 10:
+    if 0 < STATE["TIME_TO_LUCK"] - time.time() < 10:
         changed_tab = True
         go_to_tab("singularity")
         actions.click("subtab:ambrosia")
         actions.perform_sequence(f"ambrosia:loadout:max_luck")
         STATE["AMBROSIA_LOADOUT"] = "max_luck"
-        time.sleep(remaining_time + 1)
+        time.sleep(STATE["TIME_TO_LUCK"] - time.time() + 0.2)
+        if STATE.get("SINGS", 0) % 2 == 0:
+            if STATE.get("P4x4", 0) > 0:
+                optimize_ambrosia_loadouts(loadouts=["quarks", "cubes", "luck"])
+            else:
+                optimize_ambrosia_loadouts(loadouts=["quarks", "octeracts", "luck"])
         STATE["TIME_TO_LUCK"] = time_to_full_ambrosia_bar()
+
+    if STATE["AMBROSIA_LOADOUT"] != default:
+        changed_tab = True
+        go_to_tab("singularity")
+        loadout = default
+        if default == "max_cubes" and STATE["P4x4"] < 1:
+            loadout = "max_octeracts"
+        actions.perform_sequence(f"ambrosia:loadout:{loadout}")
+        STATE["AMBROSIA_LOADOUT"] = default
+
+    if changed_tab:
+        STATE["CURRENT_TAB"] = "singularity"
+        go_to_tab(last_tab)
+    go_to_tab("challenges")
+
+def check_ambrosia_2(default="max_cubes", leeway=1):
+    last_tab = STATE.get("CURRENT_TAB")
+
+    if not STATE["AMBROSIA_LOADOUT"] or STATE["TIME_TO_LUCK"] <= 0:
+        go_to_tab("singularity")
+        actions.click("subtab:ambrosia")
+        STATE["TIME_TO_LUCK"] = time_to_full_ambrosia_bar()
+
+    while True:
+        time_to_full_bar = time_to_full_ambrosia_bar()
+        current_time = time.time()
+
+        if time_to_full_bar - time.time() - leeway > 0:
+            time.sleep(time_to_full_bar - time.time() - leeway)
+
+        (previous_tab, _) = go_to_tab("singularity")
+        actions.click("subtab:ambrosia")
+        actions.perform_sequence(f"ambrosia:loadout:max_luck")
+        time.sleep(time_to_full_bar - time.time() - leeway)
+        STATE["AMBROSIA_LOADOUT"] = "max_luck"
+        if STATE.get("SINGS", 0) % 2 == 0:
+            if STATE.get("P4x4", 0) > 0:
+                optimize_ambrosia_loadouts(loadouts=["quarks", "cubes", "luck"])
+            else:
+                optimize_ambrosia_loadouts(loadouts=["quarks", "octeracts", "luck"])
+
+        go_to_tab(previous_tab)
+
+    changed_tab = False
+    if 0 < STATE["TIME_TO_LUCK"] - time.time() < 10:
+        changed_tab = True
+
     if STATE["AMBROSIA_LOADOUT"] != default:
         changed_tab = True
         go_to_tab("singularity")
@@ -2361,6 +2667,7 @@ def run_challenge(
         actions.click(f"subtab:ambrosia")
 
         STATE["TIME_TO_LUCK"] = time_to_full_ambrosia_bar()
+        #optimize_ambrosia_loadouts(loadouts=["quarks"])
         actions.perform_sequence(f"ambrosia:loadout:max_quarks")
         for _ in range(adds):
             actions.perform_sequence("hotkey:add:x1")
@@ -2420,27 +2727,18 @@ def pre_C15_fast(C10=1):
 
 
 def pre_C10():
-    go_to_tab("challenges", current=None)
-    actions.click("subtab:challenges_normal")
-    for i in range(20):
+    comp = get_completions()
+    if comp and comp[0] > 0:
+        return
+    for _ in range(20):
         go_to_tab("challenges")
         actions.click("subtab:challenges_normal")
-        completions = None
-        if i == -1:
-            actions.perform_sequence("hotkey:autochallenge")
-            time.sleep(10)
-            actions.perform_sequence("hotkey:autochallenge")
-            actions.perform_sequence("hotkey:ascend")
-            comp = get_completions()
-            if comp:
-                completions = comp[0]
-        else:
-            completions = run_challenge(
-                challenge="C10",
-                delay=0.5,
-                capture_completions=True,
-                ambrosia=False,
-            )
+        completions = run_challenge(
+            challenge="C10",
+            delay=0.5,
+            capture_completions=True,
+            ambrosia=False,
+        )
         if not completions:
             continue
         curr, _ = completions
@@ -2487,8 +2785,13 @@ def get_completions(threshold=80, go_to=True):
 
 def pre_C15(C15=1, delay=None, c13_delay=0.75):
 
-    go_to_tab("challenges", current=None)
-    actions.click(f"subtab:challenges_normal")
+    go_to_tab("challenges")
+    actions.click("subtab:challenges_normal")
+    highest = STATE["HIGHEST_BEATEN_CHALLENGE"]
+    actions.perform_sequence(f"challenge:C10:highest_beaten:C{highest}")
+    actions.perform_sequence(f"challenge:C10:highest_beaten:C{highest}")
+    time.sleep(1)
+    actions.perform_sequence("hotkey:ascend")
 
     challenges_current = {}
     challenges_maximum = {}
@@ -2528,8 +2831,8 @@ def pre_C15(C15=1, delay=None, c13_delay=0.75):
 
             ccs, max_ccs = run_challenge(
                 challenge=challenge,
-                c10_only=challenge == "C13",
-                delay=c13_delay if challenge == "C13" else delay,
+                c10_only=challenge == "C13" or (count in [1,2] and not challenge == "C11"),
+                delay=c13_delay if (challenge == "C13" or (count in [1,2] and not challenge == "C11")) else delay,
                 capture_completions=True,
                 ambrosia=True,
             )
@@ -2729,12 +3032,12 @@ def post_aoag(C15=float("1e92")):
 
     actions.perform_sequence("corruption_p4x2")
     actions.perform_sequence("hotkey:ascend")
-    for k in range(7):
+    for k in range(6):
         check_ambrosia()
         run_challenge(
             challenge="C10",
             ambrosia=True,
-            adds=1 if k > 3 else 0,
+            adds=1 if k in [2,3] else 0,
             delay=1,
         )
         actions.perform_sequence("challenge:C15:highest_beaten:C14")
@@ -2776,9 +3079,9 @@ def buy_singularity_upgrades(
     ascension_count=1,
     obtainium=1,
     offerings=1,
-    cube=100,
-    citadel=200,
-    octeracts=1,
+    cube=10,
+    citadel=20,
+    octeracts=2,
     bb_speed=True,
     luck=True,
     gq: Optional[int] = None,
@@ -2799,12 +3102,12 @@ def buy_singularity_upgrades(
     total_ratio = sum(v["ratio"] for v in kwargs.values())
     total_spent = sum(v["spent"] for v in kwargs.values())
 
-    # for i in [4, 3]:
-    #    if luck:
-    #        actions.perform_sequence(f"singularity_shop:buy:ambrosia_luck_{i}:x1")
-    #    if bb_speed:
-    #        actions.perform_sequence(f"singularity_shop:buy:blueberry_speed_{i}:x1")
-    # STATE["CURRENT_TAB"] = "singularity"
+    for i in [4, 3]:
+       if luck:
+           actions.perform_sequence(f"singularity_shop:buy:ambrosia_luck_{i}:x1")
+       if bb_speed:
+           actions.perform_sequence(f"singularity_shop:buy:blueberry_speed_{i}:x1")
+    STATE["CURRENT_TAB"] = "singularity"
 
     gq_to_spend = float("0")
     if gq is not None:
@@ -2844,76 +3147,65 @@ def buy_singularity_upgrades(
         y, x = kwargs[name]["pos"]
         actions.perform_sequence(f"singularity_shop:buy:s{y}x{x}:custom", input=to_buy)
 
-    actions.perform_sequence("subtab:singularity_shop")
-    text = ocr.text_in_rectangle("sing_shop:gq").lower()
-    text = text.split("have", maxsplit=1)[1]
-    text = text.split("golden", maxsplit=1)[0].strip()
+    #actions.perform_sequence("subtab:singularity_shop")
+    #text = ocr.text_in_rectangle("sing_shop:gq").lower()
+    #text = text.split("have", maxsplit=1)[1]
+    #text = text.split("golden", maxsplit=1)[0].strip()
 
-    gq_remaining = float("0")
-    try:
-        gq_remaining = float(text)
-    except ValueError:
-        try:
-            first, second = extract_numbers(text)
-            gq_to_spend = float(f"{first}e{int(second)}")
-        except ValueError:
-            pass
-    return gq_to_spend - gq_remaining
+    #gq_remaining = float("0")
+    #try:
+    #    gq_remaining = float(text)
+    #except ValueError:
+    #    try:
+    #        first, second = extract_numbers(text)
+    #        gq_to_spend = float(f"{first}e{int(second)}")
+    #    except ValueError:
+    #        pass
+    #return gq_to_spend - gq_remaining
 
 
-def expand_qhept(quarks=-1, threshold=0.99):
+def expand_qhept(quarks=None, threshold=0.99, force_expand=None):
     go_to_tab("cubes")
     actions.perform_sequence("subtab:forge")
 
-    text = ocr.text_in_rectangle(
-        "resources:quarks",
-        custom_config=r"--oem 3 --psm 7 -c tessedit_char_whitelist=0123456789e",
-    ).strip()
-    current_gq = 0
-    try:
-        current_gq = float(text.strip())
-    except ValueError:
-        try:
-            first, second = extract_numbers(current_gq)
-            current_gq = float(f"{float(first)}e{int(second)}")
-        except ValueError:
-            pass
-
-    if quarks == -1:
-        actions.perform_sequence("qhept:buy:max")
-    elif quarks > 0:
-        actions.perform_sequence("qhept:buy:custom", input="1")
-    try:
-        text = ocr.text_in_rectangle("qhept:bar").strip()
-        nums = []
-        for number in map(str.strip, text.split("/")):
-            try:
-                nums.append(float(number))
-            except ValueError:
-                first, second = extract_numbers(number)
-                nums.append(float(f"{first}e{int(second)}"))
-        current, maximum = nums
-        percentage = current / maximum
-        if percentage > threshold:
-            actions.perform_sequence("qhept:expand")
-    except ValueError:
-        pass
-
-    remaining_gq = 0
-    if current_gq > 0:
+    quarks_to_spend = -1
+    if quarks is None:
         text = ocr.text_in_rectangle(
             "resources:quarks",
             custom_config=r"--oem 3 --psm 7 -c tessedit_char_whitelist=0123456789e",
-        )
+        ).strip()
+        current_gq = 0
         try:
-            remaining_gq = float(text.strip())
+            quarks_to_spend = float(text.strip())
         except ValueError:
             try:
                 first, second = extract_numbers(current_gq)
-                current_gq = float(f"{float(first)}e{int(second)}")
+                quarks_to_spend = float(f"{float(first)}e{int(second)}")
             except ValueError:
                 pass
-    return max(current_gq - remaining_gq, 0.0)
+
+    if quarks_to_spend == -1:
+        actions.perform_sequence("qhept:buy:max")
+    elif quarks_to_spend > 0:
+        actions.perform_sequence("qhept:buy:custom", input=f"{quarks_to_spend}")
+    if force_expand is not None:
+        force_expand = False
+        try:
+            text = ocr.text_in_rectangle("qhept:bar").strip()
+            nums = []
+            for number in map(str.strip, text.split("/")):
+                try:
+                    nums.append(float(number))
+                except ValueError:
+                    first, second = extract_numbers(number)
+                    nums.append(float(f"{first}e{int(second)}"))
+            current, maximum = nums
+            percentage = current / maximum
+            force_expand = percentage > threshold
+        except ValueError:
+            pass
+    if force_expand:
+        actions.perform_sequence("qhept:expand")
 
 
 def repeat_sing(
@@ -2940,27 +3232,39 @@ def repeat_sing(
             STATE["SING_STARTED_AT"]
             and current_time - STATE["SING_STARTED_AT"] > longest_sing_time
         ):
+            for name in ["luck", "cubes", "octeracts", "quarks"]:
+                path = Path.home() / "Downloads" / f"ambrosia_{name}"
+                if not path.is_file():
+                    continue
+                path.unlink()
             raise ValueError("too long sing, must recalculate!")
         if stage == "post_aoag":
             if STATE["SINGS"] > 0:
-                reset_current_sing()
+                go_to_tab("challenges")
+                actions.perform_sequence("reset_current_sing")
+                actions.perform_sequence("hotkey:autochallenge")
+                STATE["CURRENT_TAB"] = "settings"
                 STATE["P4x4"] = 0
                 STATE["AMBROSIA_LOADOUT"] = ""
                 STATE["TIME_TO_LUCK"] = 0
                 STATE["HIGHEST_BEATEN_CHALLENGE"] = 9
-                STATE["CURRENT_TAB"] = ""
-                stage = approximate_stage()
                 check_ambrosia()
+                time.sleep(3)
+                actions.perform_sequence("hotkey:autochallenge")
+                stage = approximate_stage()
+                actions.perform_sequence("hotkey:ascend")
                 STATE["TIME_TO_SING"] = current_time - STATE["SING_STARTED_AT"]
                 STATE["SING_STARTED_AT"] = current_time
-            if STATE["TIME_TO_SING"] > 0:
-                STATE["GQ_PER_HOUR"] = 3600 * (
-                    STATE["GQ_SPENT_LAST_SING"] / STATE["TIME_TO_SING"]
-                )
-                STATE["QUARKS_PER_HOUR"] = 3600 * (
-                    STATE["QUARKS_SPENT_LAST_SING"] / STATE["TIME_TO_SING"]
-                )
+            if STATE["TIME_TO_SING"] > 0 and STATE.get("T0", 0) > 0:
+                seconds_spent = current_time - STATE["T0"]
+                hours_spent = seconds_spent / 3600
+                STATE["GQ_PER_HOUR"] = STATE["GQ_SPENT"] / hours_spent
+                STATE["QUARKS_PER_HOUR"] = STATE["QUARKS_SPENT"] / hours_spent
             if STATE["SINGS"] > 0:
+                if STATE.get("T0", 0) > 0:
+                    STATE["AVERAGE_SING_TIME"] = (current_time - STATE["T0"])/STATE["SINGS"]
+                else:
+                    STATE["T0"] = current_time
                 pprint(STATE)
         else:
             STATE["SING_STARTED_AT"] = current_time
@@ -2993,23 +3297,45 @@ def repeat_sing(
             if STATE["SINGS"] > times and times != -1:
                 break
 
-            STATE["GQ_SPENT_LAST_SING"] = buy_singularity_upgrades()
-            STATE["GQ_SPENT"] += STATE["GQ_SPENT_LAST_SING"]
-            check_ambrosia()
+            load_stats()
+            pre_stats = dict(STATE["STATS"])
 
-            go_to_tab("settings")
-            actions.click("subtab:settings")
-            actions.perform_sequence("settings:daily")
+            if (STATE["SINGS"] - 1) % 10 == 0:
+                buy_singularity_upgrades(gq=pre_stats.get("golden_quarks"))
+                check_ambrosia()
 
+                go_to_tab("settings")
+                actions.click("subtab:settings")
+                actions.perform_sequence("settings:daily")
+
+            # Since we most of the time can buy 0 and only occasionaly 1
+            # We randomize the outputs
             go_to_tab("shop")
-            # actions.perform_sequence("quark_shop:buy:s1x5:custom", input=1)
-            actions.perform_sequence("quark_shop:buy:s1x6:custom", input=1)
-
-            STATE["QUARKS_SPENT_LAST_SING"] = expand_qhept(quarks=-1)
-            STATE["QUARKS_SPENT"] += STATE["QUARKS_SPENT_LAST_SING"]
+            if (STATE["SINGS"] - 1) % 2 == 0:
+                actions.perform_sequence("quark_shop:buy:s1x5:x1")
+                actions.perform_sequence("quark_shop:buy:s1x6:x1")
+            else:
+                actions.perform_sequence("quark_shop:buy:s1x6:x1")
+                actions.perform_sequence("quark_shop:buy:s1x5:x1")
             check_ambrosia()
+
+            force_expand = pre_stats["quark_hepteract"]/pre_stats["quark_hepteract_max"] > 0.99
+            expand_qhept(quarks=-1, force_expand=force_expand)
+            check_ambrosia()
+
+            load_stats()
+            post_stats = dict(STATE["STATS"])
+            pprint(pre_stats)
+            pprint(post_stats)
+
+            STATE["QUARKS_SPENT_LAST_SING"] = pre_stats["quarks"] - post_stats["quarks"]
+            STATE["QUARKS_SPENT"] += STATE["QUARKS_SPENT_LAST_SING"]
+
+            STATE["GQ_SPENT_LAST_SING"] = pre_stats["golden_quarks"] - post_stats["golden_quarks"]
+            STATE["GQ_SPENT"] += STATE["GQ_SPENT_LAST_SING"]
 
             pprint(STATE)
+            STATE["STATS"]["quarks"] = pre_stats["quarks"]
 
     if spend_gq_last_sing:
         STATE["GQ_SPENT_LAST_SING"] = buy_singularity_upgrades()
@@ -3103,7 +3429,7 @@ def main():
     #    luck_base=luck_base,
     #    luck_mult=luck_multiplier,
     #    p4x4=0,
-    #    use_preboughts=True,
+    #    optimize=True,
     # )
     # best_cube_loadout_exact = {
     #    "ambrosiaTutorial": 10,
@@ -3141,7 +3467,7 @@ def main():
     #        quarks=(i+1)*quarks,
     #        luck_base=i/10*luck_base,
     #        luck_mult=i/50*luck_multiplier,
-    #        use_preboughts=True,
+    #        optimize=True,
     #    )
     #    print(ambrosia, best_cube_loadout_exact, f"{int(100 * (cube_bonus - 1))}%")
     #    spent = 0
@@ -3258,33 +3584,56 @@ def main():
     #            print("="*79)
 
     # naive_optimizer_singularity(free_cube_flame_levels=100_000)
+    # actions.click("subtab:ambrosia")
+    # load_stats(download_file=False)
+    #optimize_ambrosia_loadouts(
+    #        loadouts=["quarks", "cubes", "luck", "octeracts"], 
+    #        quarks=float("1e19"), 
+    #        ooms=814,
+    #)
+    #return
 
     # {"ambrosiaTutorial":10,"ambrosiaPatreon":1,"ambrosiaHyperflux":5,"ambrosiaQuarks1":20,"ambrosiaCubes1":50,"ambrosiaLuck1":20,"ambrosiaLuckCube1":7,"ambrosiaQuarkCube1":7,"ambrosiaCubes2":15}
 
     # =================
     #   AUTOSINGER
     # =================
+
     for _ in range(5):
-        actions.perform_sequence("hotkey:enter")
+       actions.perform_sequence("hotkey:enter")
     stage = approximate_stage()
+    for name in ["luck", "cubes", "octeracts", "quarks"]:
+        path = Path.home() / "Downloads" / f"ambrosia_{name}"
+        if not path.is_file():
+            continue
+        path.unlink()
+
     for _ in range(10):
-        try:
-            repeat_sing(times=-1, stage=stage)
-            break
-        except ValueError as e:
-            for _ in range(5):
-                actions.perform_sequence("hotkey:enter")
-            STATE["TIME_TO_SING"] = 0
-            STATE["CURRENT_TAB"] = ""
-            STATE["AMBROSIA_LOADOUT"] = ""
-            stage = approximate_stage()
-            STATE["TIME_TO_SING"] = 40 if stage == "post_aoag" else 0
-            print(f"Error: {e}")
+       try:
+           repeat_sing(times=-1, stage=stage)
+           break
+       except Exception as e:
+           for _ in range(5):
+               actions.perform_sequence("hotkey:enter")
+               actions.click("stats_for_nerds:savefile:ok")
+           STATE["TIME_TO_SING"] = 0
+           STATE["CURRENT_TAB"] = ""
+           STATE["AMBROSIA_LOADOUT"] = ""
+           stage = approximate_stage()
+           STATE["TIME_TO_SING"] = 40 if stage == "post_aoag" else 0
+           print(f"Error: {e}")
+
     return
 
     # y,x=3,4
-    # actions.hover(name=f"singularity_shop:s{y}x{x}")
-    # ocr.text_in_rectangle("tab:singularity")
+    actions.hover(name=f"singularity_shop:s{y}x{x}")
+    #text = ocr.text_in_rectangle("tab:singularity")
+    #text = ocr.text_in_rectangle("ambrosia:current_and_lifetime") 
+
+    #actions.hover("ambrosia:ambrosiaQuarkCube1")
+    #optimize_ambrosia_loadouts(loadouts=["quarks", "cubes", "luck", "octeracts"], ooms=814, quarks=float("3.48e19"))
+
+    return
 
     # ocr.text_in_rectangle("challenge:C1:highest_beaten:C9")
 
@@ -3329,80 +3678,94 @@ def main():
     # actions.perform_sequence("challenge:C11:highest_beaten:C11")
     # repeat_sing(times=1)
 
-    #ambrosia = Ambrosia()
-    #quarks = float("2.29e18")
-    #luck_base = 1604
-    #luck_multiplier = 12/100
-    #ambrosia_amount = 995703
+    ambrosia = Ambrosia()
 
-    #stats = load_stats()
-    #print("NO QUARKS, NO P4x4")
+    stats = load_stats()
+    ambrosia.quarks = stats["quarks"]
+    ambrosia.ooms = stats["ooms"]
+    ambrosia.p4x4 = 40
+    ambrosia.luck_mult = 12 / 100
+    ambrosia.luck_base = 1604
+    ambrosia_amount = 995703
+    ambrosia_amount = 1072703
+    print("NO QUARKS, NO P4x4")
 
-    #best_loadout = ambrosia.calculate(
-    #    "cubes",
-    #    ambrosia=ambrosia_amount,
-    #    quarks=float("1e11"),
-    #    luck_base=luck_base,
-    #    luck_mult=luck_multiplier,
-    #    ooms=100,
-    #    p4x4=0,
-    #)
-    #bonus = ambrosia.calculate_bonus(
-    #    loadout=best_loadout,
-    #    quarks=stats["quarks"],
-    #    ooms=stats["ooms"],
-    #    luck_base=luck_base,
-    #    luck_mult=luck_multiplier,
-    #    p4x4=0,
-    #)
 
-    #print("MAXED")
-    #print(stats)
-    name = "cubes"
-    #for name in ["luck"]:
-    #    best_loadout = ambrosia.calculate(
-    #        name,
-    #        ambrosia=ambrosia_amount,
-    #        quarks=stats["quarks"],
-    #        luck_base=luck_base,
-    #        luck_mult=luck_multiplier,
-    #        ooms=stats["ooms"],
-    #        p4x4=40,
+    # best_loadout = ambrosia.calculate(
+    #   "cubes",
+    #   ambrosia=ambrosia_amount,
+    #   quarks=float("1e11"),
+    #   luck_base=luck_base,
+    #   luck_mult=luck_multiplier,
+    #   ooms=100,
+    #   p4x4=0,
+    # )
+    # bonus = ambrosia.calculate_bonus(
+    #   loadout=best_loadout,
+    #   quarks=stats["quarks"],
+    #   ooms=stats["ooms"],
+    #   luck_base=luck_base,
+    #   luck_mult=luck_multiplier,
+    #   p4x4=0,
+    # )
+
+    # print("MAXED")
+    # print(stats)
+    # name = "cubes"
+    loadouts: list[Literal["cubes", "quarks", "luck", "octeracts"]] = ["cubes"]
+    for loadout_type in loadouts:
+        best_loadout = ambrosia.calculate(
+            ambrosia=ambrosia_amount,
+            loadout=loadout_type,
+            method="exact",
+            optimize=True,
+        )
+        bonus = ambrosia.calculate_bonus(
+            loadout=best_loadout,
+        )
+        with open(Path.home() / "Downloads" / f"post_aoag_{loadout_type}", "w") as f:
+            f.write(json.dumps(best_loadout))
+        print(loadout_type, json.dumps(best_loadout))
+        print(bonus)
+        print(ambrosia_amount - ambrosia.calculate_price(best_loadout))
+
+    start = time.time()
+
+    print(f"START: 0")
+    ambrosia_amount=1879149
+    best_luck_loadout = ambrosia.calculate(
+        ambrosia=ambrosia_amount*0.3,
+        loadout="luck",
+        method="greedy",
+        optimize=True,
+    )
+    best_loadout = ambrosia.calculate(
+        ambrosia=ambrosia_amount - ambrosia.calculate_price(best_luck_loadout),
+        loadout="cubes",
+        method="greedy",
+        optimize=True,
+        pre_boughts=best_luck_loadout,
+    )
+    for (v, k) in best_luck_loadout.items():
+        best_loadout[v] = best_loadout.get(v, 0) + k
+    bonus = ambrosia.calculate_bonus(loadout=best_loadout)
+    print(f"STOP: {time.time() - start}")
+    print("MAXED", best_loadout)
+    print("MAXED", bonus)
+    # print("MAXED", ambrosia_amount - ambrosia.calculate_price(best_loadout))
+
+    #new_ambrosia = ambrosia_amount
+    #while True:
+    #    new_ambrosia += 1000
+    #    best_loadout = ambrosia.best_cubes_loadout_greedy(
+    #        ambrosia=new_ambrosia,
     #    )
-    #    bonus = ambrosia.calculate_bonus(
-    #        loadout=best_loadout,
-    #        quarks=stats["quarks"],
-    #        ooms=stats["ooms"],
-    #        luck_base=luck_base,
-    #        luck_mult=luck_multiplier,
-    #        p4x4=40,
-    #    )
-    #    with open(Path.home() / "Downloads" / f"post_aoag_{name}", "w") as f:
-    #        f.write(json.dumps(best_loadout))
-    #    print(name, json.dumps(best_loadout))
-    #    print(bonus)
-
-
-    #start=time.time()
-
-    #best_loadout = ambrosia.best_luck_loadout_greedy(
-    #    ambrosia=ambrosia_amount,
-    #    quarks=stats["quarks"],
-    #    luck_base=luck_base,
-    #    luck_mult=luck_multiplier,
-    #    ooms=stats["ooms"],
-    #)
-    #bonus = ambrosia.calculate_bonus(
-    #    loadout=best_loadout,
-    #    quarks=stats["quarks"],
-    #    ooms=stats["ooms"],
-    #    luck_base=luck_base,
-    #    luck_mult=luck_multiplier,
-    #    p4x4=40,
-    #)
-    #print(f"TIME: {time.time() - start}")
-    #print(best_loadout)
-    #print(bonus)
+    #    if best_loadout.get("ambrosiaHyperflux", 0) <= 4:
+    #        continue
+    #    print(new_ambrosia)
+    #    print(best_loadout)
+    #    break
+    print(stats)
 
     # Level 6/25
     # This first generation hybrid module increases cube gain by 112.19%

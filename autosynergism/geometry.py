@@ -9,10 +9,10 @@ class Rectangle:
         self.width = width
         self.height = height
 
-    def scale(self, scale_x, scale_y):
+    def scale(self, scale_x, scale_y, offset_x=0.0, offset_y=0.0):
         """Scale the rectangle coordinates, width, and height."""
-        scaled_x = self.x * scale_x
-        scaled_y = self.y * scale_y
+        scaled_x = self.x * (scale_x + offset_x)
+        scaled_y = self.y * (scale_y + offset_y)
         scaled_width = self.width * scale_x
         scaled_height = self.height * scale_y
         return Rectangle(self.name, scaled_x, scaled_y, scaled_width, scaled_height)
@@ -28,10 +28,12 @@ class Rectangle:
 
 
 class Geometry:
-    def __init__(self, config_file='config.json'):
+    def __init__(self, config_file='config.json', offset_x=0.0, offset_y=0.0):
         self.rectangles = {}
         self.scale_x = 1.0
+        self.offset_x = offset_x
         self.scale_y = 1.0
+        self.offset_y = offset_y
         self.load_from_file(config_file)
 
     def load_from_file(self, filename):
@@ -50,7 +52,7 @@ class Geometry:
     def add_rectangle(self, name, x, y, width, height):
         """Add a rectangle and automatically scale it."""
         rect = Rectangle(name, x, y, width, height)
-        scaled_rect = rect.scale(self.scale_x, self.scale_y)
+        scaled_rect = rect.scale(self.scale_x, self.scale_y, offset_x=self.offset_x, offset_y=self.offset_y)
         self.rectangles[name] = scaled_rect
 
     def get_rectangle(self, name):
